@@ -29,38 +29,52 @@ func vprintf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "+ "+format, args...)
 }
 
-func lookup(t, hostname string, ch chan<- string, client *dns.Client, server string) {
-	switch t {
-	case "A":
-		lookup_a(hostname, ch, client, server)
-	case "AAAA":
-		lookup_aaaa(hostname, ch, client, server)
-	case "MX":
-		lookup_mx(hostname, ch)
-	case "NS":
-		lookup_ns(hostname, ch)
-	case "SOA":
-		lookup_soa(hostname, ch, client, server)
-	case "TXT":
-		lookup_txt(hostname, ch)
-	default:
-		log.Fatal("Error: unhandled type '" + t + "'")
-	}
-}
-
-func lookup_a(hostname string, ch chan<- string, client *dns.Client, server string) {
-	msg := new(dns.Msg)
-	msg.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
-	msg.RecursionDesired = true
-
+func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname string) *dns.Msg {
 	resp, _, err := client.Exchange(msg, server)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if resp.Rcode != dns.RcodeSuccess {
-		log.Fatalf("Error in SOA request for %s\n", hostname)
+		log.Fatalf("Error in %s request for %q\n", rrtype, hostname)
 	}
+	return resp
+}
 
+func lookup(t, hostname string, ch chan<- string, client *dns.Client, server string) {
+	msg := new(dns.Msg)
+	msg.RecursionDesired = true
+
+	switch t {
+	case "A":
+		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
+		resp := dns_lookup(client, server, msg, t, hostname)
+		format_a(ch, resp)
+	case "AAAA":
+		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeAAAA)
+		resp := dns_lookup(client, server, msg, t, hostname)
+		format_aaaa(ch, resp)
+	case "MX":
+		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeMX)
+		resp := dns_lookup(client, server, msg, t, hostname)
+		format_mx(ch, resp)
+	case "NS":
+		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNS)
+		resp := dns_lookup(client, server, msg, t, hostname)
+		format_ns(ch, resp)
+	case "SOA":
+		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSOA)
+		resp := dns_lookup(client, server, msg, t, hostname)
+		format_soa(ch, resp)
+	case "TXT":
+		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeTXT)
+		resp := dns_lookup(client, server, msg, t, hostname)
+		format_txt(ch, resp)
+	default:
+		log.Fatal("Error: unhandled type '" + t + "'")
+	}
+}
+
+func format_a(ch chan<- string, resp *dns.Msg) {
 	var text string
 	for _, ans := range resp.Answer {
 		a := ans.(*dns.A)
@@ -69,19 +83,7 @@ func lookup_a(hostname string, ch chan<- string, client *dns.Client, server stri
 	ch <- text
 }
 
-func lookup_aaaa(hostname string, ch chan<- string, client *dns.Client, server string) {
-	msg := new(dns.Msg)
-	msg.SetQuestion(dns.Fqdn(hostname), dns.TypeAAAA)
-	msg.RecursionDesired = true
-
-	resp, _, err := client.Exchange(msg, server)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if resp.Rcode != dns.RcodeSuccess {
-		log.Fatalf("Error in SOA request for %s\n", hostname)
-	}
-
+func format_aaaa(ch chan<- string, resp *dns.Msg) {
 	var text string
 	for _, ans := range resp.Answer {
 		aaaa := ans.(*dns.AAAA)
@@ -90,28 +92,20 @@ func lookup_aaaa(hostname string, ch chan<- string, client *dns.Client, server s
 	ch <- text
 }
 
-func lookup_mx(hostname string, ch chan<- string) {
-	elts, err := net.LookupMX(hostname)
-	if err != nil {
-		log.Fatal(err)
-	}
-
+func format_mx(ch chan<- string, resp *dns.Msg) {
 	var text string
-	for _, mx := range elts {
-		text += fmt.Sprintf("%s\t%d\t%s\n", "MX", mx.Pref, mx.Host)
+	for _, ans := range resp.Answer {
+		mx := ans.(*dns.MX)
+		text += fmt.Sprintf("%s\t%d\t%s\n", "MX", mx.Preference, mx.Mx)
 	}
 	ch <- text
 }
 
-func lookup_ns(hostname string, ch chan<- string) {
-	nss, err := net.LookupNS(hostname)
-	if err != nil {
-		log.Fatal(err)
-	}
-
+func format_ns(ch chan<- string, resp *dns.Msg) {
 	var elts []string
-	for _, ns := range nss {
-		elts = append(elts, ns.Host)
+	for _, ans := range resp.Answer {
+		ns := ans.(*dns.NS)
+		elts = append(elts, ns.Ns)
 	}
 	sort.Strings(elts)
 
@@ -122,19 +116,7 @@ func lookup_ns(hostname string, ch chan<- string) {
 	ch <- text
 }
 
-func lookup_soa(hostname string, ch chan<- string, client *dns.Client, server string) {
-	msg := new(dns.Msg)
-	msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSOA)
-	msg.RecursionDesired = true
-
-	resp, _, err := client.Exchange(msg, server)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if resp.Rcode != dns.RcodeSuccess {
-		log.Fatalf("Error in SOA request for %s\n", hostname)
-	}
-
+func format_soa(ch chan<- string, resp *dns.Msg) {
 	var text string
 	for _, ans := range resp.Answer {
 		soa := ans.(*dns.SOA)
@@ -143,10 +125,11 @@ func lookup_soa(hostname string, ch chan<- string, client *dns.Client, server st
 	ch <- text
 }
 
-func lookup_txt(hostname string, ch chan<- string) {
-	elts, err := net.LookupTXT(hostname)
-	if err != nil {
-		log.Fatal(err)
+func format_txt(ch chan<- string, resp *dns.Msg) {
+	var elts []string
+	for _, ans := range resp.Answer {
+		txt := ans.(*dns.TXT)
+		elts = append(elts, strings.Join(txt.Txt, ""))
 	}
 	sort.Strings(elts)
 
