@@ -1,4 +1,5 @@
-// A DNS ANY client
+// dany is a commandline DNS client that simulates (unreliable/semi-deprecated) dns `ANY`
+// queries by doing individual typed DNS queries concurrently and aggregating the results
 
 package main
 
