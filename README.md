@@ -12,7 +12,10 @@ Usage
     dany [<types>] <hostname>
 
 where `<types>` is a comma-separated list of DNS record types to query.
-If unspecified, the default `types` list is: `NS,A,AAAA,MX,TXT`.
+If unspecified, the default `types` list is: `SOA,NS,A,AAAA,MX,TXT`.
+
+In the output, fields are separated by tabs, so you can use `cut` (with no
+delimiter) to extract individual fields.
 
 Examples:
 
@@ -26,6 +29,7 @@ MX      30      aer-mx-01.cisco.com.
 NS              ns1.cisco.com.
 NS              ns2.cisco.com.
 NS              ns3.cisco.com.
+SOA             ns1.cisco.com.      postmaster.cisco.com.
 TXT             926723159-3188410
 TXT             MS=ms35724259
 TXT             docusign=5e18de8e-36d0-4a8e-8e88-b7803423fa2f
@@ -49,14 +53,14 @@ TXT             globalsign-smime-dv=CDYX+XFHUw2wml6/Gb8+59BsH31KzUr6c1l2BPvqKX8=
 TXT             v=spf1 include:_spf.google.com ~all
 ```
 
-Licence
--------
-
-MIT. See `LICENCE`.
-
-
 Author
 ------
 
 Gavin Carr <gavin@openfusion.com.au>
+
+
+Licence
+-------
+
+MIT. See `LICENCE`.
 
