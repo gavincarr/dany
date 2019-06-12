@@ -31,6 +31,12 @@ func vprintf(format string, args ...interface{}) {
 
 func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname string) *dns.Msg {
 	resp, _, err := client.Exchange(msg, server)
+	// Handle message truncation with udp
+	if resp.Truncated && client.Net != "tcp" {
+		vprintf("%s lookup truncated, trying TCP\n", rrtype)
+		client.Net = "tcp"
+		resp, _, err = client.Exchange(msg, server)
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
