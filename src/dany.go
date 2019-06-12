@@ -50,119 +50,111 @@ func lookup(rrtype, hostname string, ch chan<- string, client *dns.Client, serve
 	msg := new(dns.Msg)
 	msg.RecursionDesired = true
 
+	var text string
 	switch rrtype {
 	case "A":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		format_a(ch, rrtype, resp)
+		text = format_a(rrtype, resp)
 	case "AAAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeAAAA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		format_aaaa(ch, rrtype, resp)
+		text = format_aaaa(rrtype, resp)
 	case "MX":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeMX)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		format_mx(ch, rrtype, resp)
+		text = format_mx(rrtype, resp)
 	case "NS":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNS)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		format_ns(ch, rrtype, resp)
+		text = format_ns(rrtype, resp)
 	case "SOA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSOA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		format_soa(ch, rrtype, resp)
+		text = format_soa(rrtype, resp)
 	case "SRV":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSRV)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		format_srv(ch, rrtype, resp)
+		text = format_srv(rrtype, resp)
 	case "TXT":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeTXT)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		format_txt(ch, rrtype, resp)
+		text = format_txt(rrtype, resp)
 	default:
 		log.Fatalf("Error: unhandled type %q", rrtype)
 	}
+
+	ch <- text
 }
 
-func format_a(ch chan<- string, rrtype string, resp *dns.Msg) {
-	var text string
+func format_a(rrtype string, resp *dns.Msg) string {
+	var elts []string
 	for _, ans := range resp.Answer {
 		a := ans.(*dns.A)
-		text += fmt.Sprintf("%s\t\t%s\n", rrtype, a.A.String())
+		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, a.A.String()))
 	}
-	ch <- text
+	sort.Strings(elts)
+	return strings.Join(elts, "")
 }
 
-func format_aaaa(ch chan<- string, rrtype string, resp *dns.Msg) {
-	var text string
+func format_aaaa(rrtype string, resp *dns.Msg) string {
+	var elts []string
 	for _, ans := range resp.Answer {
 		aaaa := ans.(*dns.AAAA)
-		text += fmt.Sprintf("%s\t\t%s\n", rrtype, aaaa.AAAA.String())
+		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, aaaa.AAAA.String()))
 	}
-	ch <- text
+	sort.Strings(elts)
+	return strings.Join(elts, "")
 }
 
-func format_mx(ch chan<- string, rrtype string, resp *dns.Msg) {
-	var text string
+func format_mx(rrtype string, resp *dns.Msg) string {
+	var elts []string
 	for _, ans := range resp.Answer {
 		mx := ans.(*dns.MX)
-		text += fmt.Sprintf("%s\t%d\t%s\n", rrtype, mx.Preference, mx.Mx)
+		elts = append(elts, fmt.Sprintf("%s\t%d\t%s\n", rrtype, mx.Preference, mx.Mx))
 	}
-	ch <- text
+	sort.Strings(elts)
+	return strings.Join(elts, "")
 }
 
-func format_ns(ch chan<- string, rrtype string, resp *dns.Msg) {
+func format_ns(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		ns := ans.(*dns.NS)
-		elts = append(elts, ns.Ns)
+		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, ns.Ns))
 	}
 	sort.Strings(elts)
-
-	var text string
-	for _, elt := range elts {
-		text += fmt.Sprintf("%s\t\t%s\n", rrtype, elt)
-	}
-	ch <- text
+	return strings.Join(elts, "")
 }
 
-func format_soa(ch chan<- string, rrtype string, resp *dns.Msg) {
-	var text string
+func format_soa(rrtype string, resp *dns.Msg) string {
+	var elts []string
 	for _, ans := range resp.Answer {
 		soa := ans.(*dns.SOA)
-		text += fmt.Sprintf("%s\t\t%s\t%s\n", rrtype, soa.Ns, soa.Mbox)
+		elts = append(elts, fmt.Sprintf("%s\t\t%s\t%s\n", rrtype, soa.Ns, soa.Mbox))
 	}
-	ch <- text
+	sort.Strings(elts)
+	return strings.Join(elts, "")
 }
 
-func format_srv(ch chan<- string, rrtype string, resp *dns.Msg) {
+func format_srv(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		srv := ans.(*dns.SRV)
 		elts = append(elts, fmt.Sprintf("%s\t%d\t%d\t%d\t%s\n", rrtype, srv.Priority, srv.Weight, srv.Port, srv.Target))
 	}
 	sort.Strings(elts)
-
-	var text string
-	for _, elt := range elts {
-		text += elt
-	}
-	ch <- text
+	return strings.Join(elts, "")
 }
 
-func format_txt(ch chan<- string, rrtype string, resp *dns.Msg) {
+func format_txt(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		txt := ans.(*dns.TXT)
-		elts = append(elts, strings.Join(txt.Txt, ""))
+		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, strings.Join(txt.Txt, "")))
 	}
 	sort.Strings(elts)
-
-	var text string
-	for _, elt := range elts {
-		text += fmt.Sprintf("%s\t\t%s\n", rrtype, elt)
-	}
-	ch <- text
+	return strings.Join(elts, "")
 }
 
 func main() {
