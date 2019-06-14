@@ -34,15 +34,26 @@ func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostnam
 	resp, _, err := client.Exchange(msg, server)
 	// Handle message truncation with udp
 	if resp.Truncated && client.Net != "tcp" {
-		vprintf("%s lookup truncated, trying TCP\n", rrtype)
+		vprintf("%s lookup truncated, retrying using TCP\n", rrtype)
 		client.Net = "tcp"
 		resp, _, err = client.Exchange(msg, server)
 	}
 	if err != nil {
 		log.Fatal(err)
 	}
-	if resp.Rcode != dns.RcodeSuccess {
-		log.Fatalf("Error in %s request for %q\n", rrtype, hostname)
+	if resp != nil {
+		// Fail on errors
+		if resp.Rcode != dns.RcodeSuccess {
+			log.Fatalf("Error in %s request for %q\n", rrtype, hostname)
+		}
+		// Handle CNAMEs
+		ans := resp.Answer
+		if ans != nil && len(ans) > 0 && ans[0].Header().Rrtype == dns.TypeCNAME {
+			cname := ans[0].(*dns.CNAME)
+			vprintf("%s %s lookup returned CNAME %q - requerying\n", hostname, rrtype, cname.Target)
+			msg.SetQuestion(dns.Fqdn(cname.Target), msg.Question[0].Qtype)
+			return dns_lookup(client, server, msg, rrtype, hostname)
+		}
 	}
 	return resp
 }
@@ -56,31 +67,45 @@ func lookup(rrtype, hostname string, ch chan<- string, client *dns.Client, serve
 	case "A":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		text = format_a(rrtype, resp)
+		if resp != nil {
+			text = format_a(rrtype, resp)
+		}
 	case "AAAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeAAAA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		text = format_aaaa(rrtype, resp)
+		if resp != nil {
+			text = format_aaaa(rrtype, resp)
+		}
 	case "MX":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeMX)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		text = format_mx(rrtype, resp)
+		if resp != nil {
+			text = format_mx(rrtype, resp)
+		}
 	case "NS":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNS)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		text = format_ns(rrtype, resp)
+		if resp != nil {
+			text = format_ns(rrtype, resp)
+		}
 	case "SOA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSOA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		text = format_soa(rrtype, resp)
+		if resp != nil {
+			text = format_soa(rrtype, resp)
+		}
 	case "SRV":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSRV)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		text = format_srv(rrtype, resp)
+		if resp != nil {
+			text = format_srv(rrtype, resp)
+		}
 	case "TXT":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeTXT)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
-		text = format_txt(rrtype, resp)
+		if resp != nil {
+			text = format_txt(rrtype, resp)
+		}
 	default:
 		log.Fatalf("Error: unhandled type %q", rrtype)
 	}
