@@ -50,6 +50,7 @@ func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostnam
 		// Handle CNAMEs
 		ans := resp.Answer
 		if ans != nil && len(ans) > 0 && ans[0].Header().Rrtype == dns.TypeCNAME && rrtype != "CNAME" {
+			// dig reports CNAME targets and then requeries, but that seems too noisy for N rrtypes
 			cname := ans[0].(*dns.CNAME)
 			vprintf("%s %s lookup returned CNAME %q - requerying\n", hostname, rrtype, cname.Target)
 			msg.SetQuestion(dns.Fqdn(cname.Target), msg.Question[0].Qtype)
@@ -200,32 +201,10 @@ func format_txt(rrtype string, resp *dns.Msg) string {
 	return strings.Join(elts, "")
 }
 
-func main() {
-	// Parse options
-	args, err := flags.Parse(&opts)
-	if err != nil {
-		//log.Fatal(err)
-		os.Exit(1)
-	}
-
-	// Setup
-	log.SetFlags(0)
-	if len(args) < 1 || len(args) > 2 {
-		fmt.Fprintln(os.Stderr, "usage: dany [OPTIONS] [<Types>] <Hostname>")
-		os.Exit(1)
-	}
-	var types []string
-	var hostname string
-	if len(args) == 1 {
+func dany(types []string, hostname string) string {
+	if types == nil || len(types) == 0 {
 		types = []string{"SOA", "NS", "A", "AAAA", "MX", "TXT"}
-		hostname = args[0]
-	} else {
-		types_arg := args[0]
-		types = strings.Split(types_arg, ",")
-		hostname = args[1]
 	}
-	vprintf("types: %s\n", types)
-	vprintf("hostname: %s\n", hostname)
 
 	// miekg/dns setup
 	config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
@@ -261,7 +240,39 @@ loop:
 		}
 	}
 
-	// Sort text results and output
+	// Sort text results
 	sort.Strings(results)
-	fmt.Print(strings.Join(results, ""))
+
+	return strings.Join(results, "")
+}
+
+func main() {
+	// Parse options
+	args, err := flags.Parse(&opts)
+	if err != nil {
+		//log.Fatal(err)
+		os.Exit(1)
+	}
+
+	// Setup
+	log.SetFlags(0)
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Fprintln(os.Stderr, "usage: dany [OPTIONS] [<Types>] <Hostname>")
+		os.Exit(1)
+	}
+	var types []string
+	var hostname string
+	if len(args) == 1 {
+		hostname = args[0]
+	} else {
+		types_arg := args[0]
+		types = strings.Split(types_arg, ",")
+		hostname = args[1]
+	}
+	vprintf("types: %s\n", types)
+	vprintf("hostname: %s\n", hostname)
+
+	// Do lookups
+	results := dany(types, hostname)
+	fmt.Print(results)
 }
