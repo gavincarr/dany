@@ -32,14 +32,15 @@ func vprintf(format string, args ...interface{}) {
 
 func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname string) *dns.Msg {
 	resp, _, err := client.Exchange(msg, server)
-	if err != nil {
-		log.Fatal(err)
-	}
 	// Handle message truncation with udp
 	if resp != nil && resp.Truncated && client.Net != "tcp" {
 		vprintf("%s lookup truncated, retrying using TCP\n", rrtype)
 		client.Net = "tcp"
 		resp, _, err = client.Exchange(msg, server)
+	}
+	// Die on non-truncation errors
+	if err != nil {
+		log.Fatal(err)
 	}
 	if resp != nil {
 		// Fail on errors
@@ -48,7 +49,7 @@ func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostnam
 		}
 		// Handle CNAMEs
 		ans := resp.Answer
-		if ans != nil && len(ans) > 0 && ans[0].Header().Rrtype == dns.TypeCNAME {
+		if ans != nil && len(ans) > 0 && ans[0].Header().Rrtype == dns.TypeCNAME && rrtype != "CNAME" {
 			cname := ans[0].(*dns.CNAME)
 			vprintf("%s %s lookup returned CNAME %q - requerying\n", hostname, rrtype, cname.Target)
 			msg.SetQuestion(dns.Fqdn(cname.Target), msg.Question[0].Qtype)
@@ -75,6 +76,12 @@ func lookup(rrtype, hostname string, ch chan<- string, client *dns.Client, serve
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
 			text = format_aaaa(rrtype, resp)
+		}
+	case "CNAME":
+		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCNAME)
+		resp := dns_lookup(client, server, msg, rrtype, hostname)
+		if resp != nil {
+			text = format_cname(rrtype, resp)
 		}
 	case "MX":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeMX)
@@ -128,6 +135,16 @@ func format_aaaa(rrtype string, resp *dns.Msg) string {
 	for _, ans := range resp.Answer {
 		aaaa := ans.(*dns.AAAA)
 		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, aaaa.AAAA.String()))
+	}
+	sort.Strings(elts)
+	return strings.Join(elts, "")
+}
+
+func format_cname(rrtype string, resp *dns.Msg) string {
+	var elts []string
+	for _, ans := range resp.Answer {
+		cname := ans.(*dns.CNAME)
+		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, cname.Target))
 	}
 	sort.Strings(elts)
 	return strings.Join(elts, "")
