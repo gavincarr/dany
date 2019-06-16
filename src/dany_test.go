@@ -49,6 +49,8 @@ func TestSpecific(t *testing.T) {
 		{"openfusion.com.au", []string{"cname"}, "cname"},
 		{"openfusion.com.au", []string{"soa", "txt"}, "soa_txt"},
 		{"profound.net", []string{"a", "mx"}, "a_mx"},
+		{"cisco.com", []string{"a", "aaaa"}, "a_aaaa"},
+		{"_sip._tcp.cisco.com", []string{"srv"}, "srv"},
 		{"www.zoom.us", []string{"ns"}, "ns"},
 		{"www.zoom.us", []string{"cname"}, "cname"},
 		{"www.zoom.us", []string{"soa", "ns"}, "soa_ns"},
