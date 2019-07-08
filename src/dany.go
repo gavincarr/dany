@@ -17,10 +17,25 @@ import (
 )
 
 const TIMEOUT_SECONDS = 10
+const SUPPORTED_RRTYPES = "A,AAAA,CNAME,MX,NS,SOA,SRV,TXT"
 
 // Options
 var opts struct {
 	Verbose bool `short:"v" long:"verbose" description:"display verbose debug output"`
+	Args    struct {
+		Types    string `description:"comma-separated list of DNS resource types to lookup (default: a,aaaa,mx,ns,soa,txt)"`
+		Hostname string `description:"hostname/domain to lookup"`
+		Extra    []string
+	} `positional-args:"yes"`
+}
+
+// Disable flags.PrintErrors for more control
+var parser = flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
+
+func usage() {
+	parser.WriteHelp(os.Stderr)
+	fmt.Fprintf(os.Stderr, "\nSupported DNS resource types: %s\n", SUPPORTED_RRTYPES)
+	os.Exit(2)
 }
 
 func vprintf(format string, args ...interface{}) {
@@ -248,26 +263,25 @@ loop:
 
 func main() {
 	// Parse options
-	args, err := flags.Parse(&opts)
-	if err != nil {
-		//log.Fatal(err)
-		os.Exit(1)
+	if _, err := parser.Parse(); err != nil {
+		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type != flags.ErrHelp {
+			fmt.Fprintf(os.Stderr, "%s\n\n", err)
+		}
+		usage()
 	}
 
 	// Setup
 	log.SetFlags(0)
-	if len(args) < 1 || len(args) > 2 {
-		fmt.Fprintln(os.Stderr, "usage: dany [OPTIONS] [<Types>] <Hostname>")
-		os.Exit(1)
-	}
 	var types []string
 	var hostname string
-	if len(args) == 1 {
-		hostname = args[0]
+	if opts.Args.Types == "" {
+		usage()
+	} else if opts.Args.Hostname == "" {
+		hostname = opts.Args.Types
 	} else {
-		types_arg := args[0]
+		types_arg := opts.Args.Types
 		types = strings.Split(types_arg, ",")
-		hostname = args[1]
+		hostname = opts.Args.Hostname
 	}
 	vprintf("types: %s\n", types)
 	vprintf("hostname: %s\n", hostname)
