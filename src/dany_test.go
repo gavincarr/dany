@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"io/ioutil"
+	"log"
 	"testing"
 )
 
@@ -15,7 +16,11 @@ func TestDefaults(t *testing.T) {
 	}
 	for _, hostname := range hostnames {
 		golden := "testdata/" + hostname + ".golden"
-		actual := dany(nil, hostname)
+		query, err := parseArgs([]string{hostname})
+		if err != nil {
+			log.Fatal(err)
+		}
+		actual := dany(query)
 
 		// Read expected output from golden file
 		expected, err := ioutil.ReadFile(golden)
@@ -57,7 +62,12 @@ func TestSpecific(t *testing.T) {
 	}
 	for _, test := range tests {
 		golden := "testdata/" + test.hostname + "_" + test.label + ".golden"
-		actual := dany(test.types, test.hostname)
+		query, err := parseArgs([]string{test.hostname})
+		if err != nil {
+			log.Fatal(err)
+		}
+		query.Types = test.types
+		actual := dany(query)
 
 		// Read expected output from golden file
 		expected, err := ioutil.ReadFile(golden)

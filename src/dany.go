@@ -19,6 +19,12 @@ import (
 const TIMEOUT_SECONDS = 10
 const SUPPORTED_RRTYPES = "A,AAAA,CNAME,MX,NS,SOA,SRV,TXT"
 
+type Query struct {
+	Hostname string
+	Server   string
+	Types    []string
+}
+
 // Options
 var opts struct {
 	Verbose bool `short:"v" long:"verbose" description:"display verbose debug output"`
@@ -216,23 +222,13 @@ func format_txt(rrtype string, resp *dns.Msg) string {
 	return strings.Join(elts, "")
 }
 
-func dany(types []string, hostname string) string {
-	if types == nil || len(types) == 0 {
-		types = []string{"SOA", "NS", "A", "AAAA", "MX", "TXT"}
-	}
-
-	// miekg/dns setup
-	config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
-	if err != nil {
-		log.Fatal(err)
-	}
-	server := net.JoinHostPort(config.Servers[0], config.Port)
+func dany(query *Query) string {
 	client := new(dns.Client)
 
 	// Do lookups, using resultStream to gather results
-	resultStream := make(chan string, len(types))
-	for _, t := range types {
-		go lookup(strings.ToUpper(t), hostname, resultStream, client, server)
+	resultStream := make(chan string, len(query.Types))
+	for _, t := range query.Types {
+		go lookup(strings.ToUpper(t), query.Hostname, resultStream, client, query.Server)
 	}
 
 	var results []string
@@ -246,7 +242,7 @@ loop:
 				results = append(results, res)
 			}
 			count++
-			if count >= len(types) {
+			if count >= len(query.Types) {
 				break loop
 			}
 		// Timeout if some results just take too long
@@ -261,6 +257,37 @@ loop:
 	return strings.Join(results, "")
 }
 
+func parseArgs(args []string) (*Query, error) {
+	vprintf("args: %v\n", args)
+
+	query := new(Query)
+
+	if len(args) > 1 && args[1] != "" {
+		query.Types = strings.Split(args[0], ",")
+		query.Hostname = args[1]
+	} else if len(args) > 0 && args[0] != "" {
+		query.Hostname = args[0]
+	}
+
+	if query.Types == nil || len(query.Types) == 0 {
+		query.Types = []string{"SOA", "NS", "A", "AAAA", "MX", "TXT"}
+	}
+
+	if query.Server == "" {
+		config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
+		if err != nil {
+			return nil, err
+		}
+		query.Server = net.JoinHostPort(config.Servers[0], config.Port)
+	}
+
+	vprintf("hostname: %s\n", query.Hostname)
+	vprintf("server: %s\n", query.Server)
+	vprintf("types: %v\n", query.Types)
+
+	return query, nil
+}
+
 func main() {
 	// Parse options
 	if _, err := parser.Parse(); err != nil {
@@ -272,21 +299,17 @@ func main() {
 
 	// Setup
 	log.SetFlags(0)
-	var types []string
-	var hostname string
 	if opts.Args.Types == "" {
 		usage()
-	} else if opts.Args.Hostname == "" {
-		hostname = opts.Args.Types
-	} else {
-		types_arg := opts.Args.Types
-		types = strings.Split(types_arg, ",")
-		hostname = opts.Args.Hostname
 	}
-	vprintf("types: %s\n", types)
-	vprintf("hostname: %s\n", hostname)
+	// Actually treat opts.Args as an unordered []string and parse query elements
+	args := append([]string{opts.Args.Types, opts.Args.Hostname}, opts.Args.Extra...)
+	query, err := parseArgs(args)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Do lookups
-	results := dany(types, hostname)
+	results := dany(query)
 	fmt.Print(results)
 }
