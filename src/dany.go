@@ -4,10 +4,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -17,7 +19,10 @@ import (
 )
 
 const TIMEOUT_SECONDS = 10
-const SUPPORTED_RRTYPES = "A,AAAA,CNAME,MX,NS,SOA,SRV,TXT"
+const DNS_PORT = "53"
+
+var SUPPORTED_RRTYPES = []string{"A", "AAAA", "CNAME", "MX", "NS", "SOA", "SRV", "TXT"}
+var DEFAULT_RRTYPES = []string{"A", "AAAA", "MX", "NS", "SOA", "TXT"}
 
 type Query struct {
 	Hostname string
@@ -40,7 +45,7 @@ var parser = flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
 
 func usage() {
 	parser.WriteHelp(os.Stderr)
-	fmt.Fprintf(os.Stderr, "\nSupported DNS resource types: %s\n", SUPPORTED_RRTYPES)
+	fmt.Fprintf(os.Stderr, "\nSupported DNS resource types: %s\n", strings.Join(SUPPORTED_RRTYPES, ","))
 	os.Exit(2)
 }
 
@@ -258,19 +263,78 @@ loop:
 }
 
 func parseArgs(args []string) (*Query, error) {
-	vprintf("args: %v\n", args)
-
 	query := new(Query)
 
-	if len(args) > 1 && args[1] != "" {
-		query.Types = strings.Split(args[0], ",")
-		query.Hostname = args[1]
-	} else if len(args) > 0 && args[0] != "" {
-		query.Hostname = args[0]
+	// Regexps
+	re_at_prefix := regexp.MustCompile("^@")
+	re_dot := regexp.MustCompile("\\.")
+	re_comma := regexp.MustCompile(",")
+
+	typeMap := make(map[string]bool)
+	for _, t := range SUPPORTED_RRTYPES {
+		typeMap[t] = true
+		typeMap[strings.ToLower(t)] = true
+	}
+
+	// Args: 1 domain (required); 1 @-prefixed server ip (optional); 1 comma-separated list of types (optional)
+	for _, arg := range args {
+		arg_is_rrtype := false
+		// Check whether non-dotted args are bare RRtypes
+		if !re_dot.MatchString(arg) {
+			if _, ok := typeMap[arg]; ok {
+				arg_is_rrtype = true
+			}
+		}
+		// Check for @<ip> server argument
+		if re_at_prefix.MatchString(arg) {
+			if query.Server != "" {
+				err := errors.New(fmt.Sprintf("Error: argument %q looks like `@<ip>`, but we already have %q",
+					arg, query.Server))
+				return nil, err
+			}
+			server_ip := net.ParseIP(arg[1:])
+			if server_ip == nil {
+				err := errors.New(fmt.Sprintf("Error: argument %q looks like `@<ip>`, but unable to parse ip address",
+					arg))
+				return nil, err
+			}
+			query.Server = net.JoinHostPort(server_ip.String(), DNS_PORT)
+			continue
+		}
+		// Check for <RR>[,<RR>...] types argument
+		if arg_is_rrtype || re_comma.MatchString(arg) {
+			if len(query.Types) != 0 {
+				err := errors.New(fmt.Sprintf("Error: argument %q looks like types list, but we already have %q",
+					arg, query.Types))
+				return nil, err
+			}
+			// Check all types are valid
+			types := strings.Split(arg, ",")
+			var badTypes []string
+			for _, t := range types {
+				if _, ok := typeMap[t]; !ok {
+					badTypes = append(badTypes, t)
+				}
+			}
+			if len(badTypes) > 0 {
+				err := errors.New(fmt.Sprintf("Error: unsupported types found in %q: %s",
+					arg, strings.Join(badTypes, ",")))
+				return nil, err
+			}
+			query.Types = strings.Split(arg, ",")
+			continue
+		}
+		// Otherwise assume hostname
+		if query.Hostname != "" {
+			err := errors.New(fmt.Sprintf("Error: argument %q looks like hostname, but we already have %q",
+				arg, query.Hostname))
+			return nil, err
+		}
+		query.Hostname = arg
 	}
 
 	if query.Types == nil || len(query.Types) == 0 {
-		query.Types = []string{"SOA", "NS", "A", "AAAA", "MX", "TXT"}
+		query.Types = DEFAULT_RRTYPES
 	}
 
 	if query.Server == "" {
@@ -302,8 +366,14 @@ func main() {
 	if opts.Args.Types == "" {
 		usage()
 	}
-	// Actually treat opts.Args as an unordered []string and parse query elements
-	args := append([]string{opts.Args.Types, opts.Args.Hostname}, opts.Args.Extra...)
+	// Actually treat opts.Args as an unordered []string and parse into query elements
+	args := []string{opts.Args.Types}
+	if opts.Args.Hostname != "" {
+		args = append(args, opts.Args.Hostname)
+	}
+	if len(opts.Args.Extra) > 0 {
+		args = append(args, opts.Args.Extra...)
+	}
 	query, err := parseArgs(args)
 	if err != nil {
 		log.Fatal(err)

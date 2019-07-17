@@ -4,7 +4,10 @@ import (
 	"flag"
 	"io/ioutil"
 	"log"
+	"math/rand"
+	"strings"
 	"testing"
+	"time"
 )
 
 var update = flag.Bool("update", false, "update .golden files")
@@ -44,7 +47,7 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
-func TestSpecific(t *testing.T) {
+func TestTypesParseArgs(t *testing.T) {
 	var tests = []struct {
 		hostname string
 		types    []string
@@ -62,11 +65,18 @@ func TestSpecific(t *testing.T) {
 	}
 	for _, test := range tests {
 		golden := "testdata/" + test.hostname + "_" + test.label + ".golden"
-		query, err := parseArgs([]string{test.hostname})
+		// Randomise args
+		r := rand.New(rand.NewSource(time.Now().Unix()))
+		args := []string{test.hostname, "@8.8.8.8", strings.Join(test.types, ",")}
+		args_rand := make([]string, len(args))
+		perm := r.Perm(len(args))
+		for i, randIndex := range perm {
+			args_rand[i] = args[randIndex]
+		}
+		query, err := parseArgs(args_rand)
 		if err != nil {
 			log.Fatal(err)
 		}
-		query.Types = test.types
 		actual := dany(query)
 
 		// Read expected output from golden file
