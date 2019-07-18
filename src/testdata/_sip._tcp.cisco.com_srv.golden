@@ -1,4 +1,4 @@
-SRV	1	50	5060	vcsgw101.cisco.com.
-SRV	1	50	5060	vcsgw102.cisco.com.
-SRV	1	50	5060	vcsgw103.cisco.com.
-SRV	1	50	5060	vcsgw104.cisco.com.
+SRV	1 50 5060	vcsgw101.cisco.com.
+SRV	1 50 5060	vcsgw102.cisco.com.
+SRV	1 50 5060	vcsgw103.cisco.com.
+SRV	1 50 5060	vcsgw104.cisco.com.

@@ -3,7 +3,7 @@ MX	10	shell-com.mail.protection.outlook.com.
 NS		dns1.shell.com.
 NS		dns2.shell.com.
 NS		dns3.shell.com.
-SOA		dns1.shell.com.	dns.shell.com.
+SOA		dns1.shell.com. dns.shell.com.
 TXT		5rd5scsii7robjjqc7kc18nmjs
 TXT		MS=ms30427294
 TXT		MS=ms99377552

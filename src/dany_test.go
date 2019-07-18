@@ -64,6 +64,7 @@ func TestTypesParseArgs(t *testing.T) {
 		{"www.zoom.us", []string{"cname"}, "cname"},
 		{"www.zoom.us", []string{"soa", "ns"}, "soa_ns"},
 		{"shell.com", []string{"caa", "dnskey"}, "caa_dnskey"},
+		{"comcast.com", []string{"nsec", "soa"}, "nsec_soa"},
 	}
 	for _, test := range tests {
 		golden := "testdata/" + test.hostname + "_" + test.label + ".golden"

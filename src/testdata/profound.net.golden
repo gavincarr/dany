@@ -3,5 +3,5 @@ MX	0	profound.mail.pairserver.com.
 NS		a.ns.profound.net.
 NS		b.ns.profound.net.
 NS		c.ns.profound.net.
-SOA		c.ns.profound.net.	hostmaster.profound.net.
+SOA		c.ns.profound.net. hostmaster.profound.net.
 TXT		google-site-verification=TSJDLHC5ReIHkW8C5RyfrSilKcp0-WK0Um0Mgrg0h3Y

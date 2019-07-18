@@ -22,7 +22,7 @@ const TIMEOUT_SECONDS = 10
 const DNS_PORT = "53"
 
 var DEFAULT_RRTYPES = []string{"A", "AAAA", "MX", "NS", "SOA", "TXT"}
-var SUPPORTED_RRTYPES = []string{"A", "AAAA", "CAA", "CNAME", "DNSKEY", "MX", "NS", "SOA", "SRV", "TXT"}
+var SUPPORTED_RRTYPES = []string{"A", "AAAA", "CAA", "CNAME", "DNSKEY", "MX", "NS", "NSEC", "SOA", "SRV", "TXT"}
 
 type Query struct {
 	Hostname string
@@ -136,6 +136,12 @@ func lookup(rrtype, hostname string, ch chan<- string, client *dns.Client, serve
 		if resp != nil {
 			text = format_ns(rrtype, resp)
 		}
+	case "NSEC":
+		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNSEC)
+		resp := dns_lookup(client, server, msg, rrtype, hostname)
+		if resp != nil {
+			text = format_nsec(rrtype, resp)
+		}
 	case "SOA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSOA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
@@ -164,8 +170,8 @@ func lookup(rrtype, hostname string, ch chan<- string, client *dns.Client, serve
 func format_a(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
-		a := ans.(*dns.A)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, a.A.String()))
+		rr := ans.(*dns.A)
+		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, rr.A.String()))
 	}
 	sort.Strings(elts)
 	return strings.Join(elts, "")
@@ -174,8 +180,8 @@ func format_a(rrtype string, resp *dns.Msg) string {
 func format_aaaa(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
-		aaaa := ans.(*dns.AAAA)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, aaaa.AAAA.String()))
+		rr := ans.(*dns.AAAA)
+		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, rr.AAAA.String()))
 	}
 	sort.Strings(elts)
 	return strings.Join(elts, "")
@@ -194,8 +200,8 @@ func format_caa(rrtype string, resp *dns.Msg) string {
 func format_cname(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
-		cname := ans.(*dns.CNAME)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, cname.Target))
+		rr := ans.(*dns.CNAME)
+		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, rr.Target))
 	}
 	sort.Strings(elts)
 	return strings.Join(elts, "")
@@ -214,8 +220,8 @@ func format_dnskey(rrtype string, resp *dns.Msg) string {
 func format_mx(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
-		mx := ans.(*dns.MX)
-		elts = append(elts, fmt.Sprintf("%s\t%d\t%s\n", rrtype, mx.Preference, mx.Mx))
+		rr := ans.(*dns.MX)
+		elts = append(elts, fmt.Sprintf("%s\t%d\t%s\n", rrtype, rr.Preference, rr.Mx))
 	}
 	sort.Strings(elts)
 	return strings.Join(elts, "")
@@ -224,8 +230,23 @@ func format_mx(rrtype string, resp *dns.Msg) string {
 func format_ns(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
-		ns := ans.(*dns.NS)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, ns.Ns))
+		rr := ans.(*dns.NS)
+		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, rr.Ns))
+	}
+	sort.Strings(elts)
+	return strings.Join(elts, "")
+}
+
+func format_nsec(rrtype string, resp *dns.Msg) string {
+	var elts []string
+	for _, ans := range resp.Answer {
+		rr := ans.(*dns.NSEC)
+		s := fmt.Sprintf("%s\t\t%s", rrtype, rr.NextDomain)
+		for _, t := range rr.TypeBitMap {
+			s += " " + dns.Type(t).String()
+		}
+		s += "\n"
+		elts = append(elts, s)
 	}
 	sort.Strings(elts)
 	return strings.Join(elts, "")
@@ -234,8 +255,8 @@ func format_ns(rrtype string, resp *dns.Msg) string {
 func format_soa(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
-		soa := ans.(*dns.SOA)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s\t%s\n", rrtype, soa.Ns, soa.Mbox))
+		rr := ans.(*dns.SOA)
+		elts = append(elts, fmt.Sprintf("%s\t\t%s %s\n", rrtype, rr.Ns, rr.Mbox))
 	}
 	sort.Strings(elts)
 	return strings.Join(elts, "")
@@ -244,8 +265,8 @@ func format_soa(rrtype string, resp *dns.Msg) string {
 func format_srv(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
-		srv := ans.(*dns.SRV)
-		elts = append(elts, fmt.Sprintf("%s\t%d\t%d\t%d\t%s\n", rrtype, srv.Priority, srv.Weight, srv.Port, srv.Target))
+		rr := ans.(*dns.SRV)
+		elts = append(elts, fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Priority, rr.Weight, rr.Port, rr.Target))
 	}
 	sort.Strings(elts)
 	return strings.Join(elts, "")
@@ -254,8 +275,8 @@ func format_srv(rrtype string, resp *dns.Msg) string {
 func format_txt(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
-		txt := ans.(*dns.TXT)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, strings.Join(txt.Txt, "")))
+		rr := ans.(*dns.TXT)
+		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, strings.Join(rr.Txt, "")))
 	}
 	sort.Strings(elts)
 	return strings.Join(elts, "")
