@@ -21,8 +21,8 @@ import (
 const TIMEOUT_SECONDS = 10
 const DNS_PORT = "53"
 
-var SUPPORTED_RRTYPES = []string{"A", "AAAA", "CNAME", "MX", "NS", "SOA", "SRV", "TXT"}
 var DEFAULT_RRTYPES = []string{"A", "AAAA", "MX", "NS", "SOA", "TXT"}
+var SUPPORTED_RRTYPES = []string{"A", "AAAA", "CAA", "CNAME", "DNSKEY", "MX", "NS", "SOA", "SRV", "TXT"}
 
 type Query struct {
 	Hostname string
@@ -33,8 +33,9 @@ type Query struct {
 // Options
 var opts struct {
 	Verbose bool `short:"v" long:"verbose" description:"display verbose debug output"`
+	All     bool `short:"a" long:"all" description:"display all supported DNS records (rather than default set below)"`
 	Args    struct {
-		Types    string `description:"comma-separated list of DNS resource types to lookup (default: a,aaaa,mx,ns,soa,txt)"`
+		Types    string `description:"comma-separated list of DNS resource types to lookup (case-insensitive)"`
 		Hostname string `description:"hostname/domain to lookup"`
 		Extra    []string
 	} `positional-args:"yes"`
@@ -45,7 +46,8 @@ var parser = flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
 
 func usage() {
 	parser.WriteHelp(os.Stderr)
-	fmt.Fprintf(os.Stderr, "\nSupported DNS resource types: %s\n", strings.Join(SUPPORTED_RRTYPES, ","))
+	fmt.Fprintf(os.Stderr, "\nDefault DNS resource types: %s\n", strings.Join(DEFAULT_RRTYPES, ","))
+	fmt.Fprintf(os.Stderr, "Supported DNS resource types: %s\n", strings.Join(SUPPORTED_RRTYPES, ","))
 	os.Exit(2)
 }
 
@@ -104,11 +106,23 @@ func lookup(rrtype, hostname string, ch chan<- string, client *dns.Client, serve
 		if resp != nil {
 			text = format_aaaa(rrtype, resp)
 		}
+	case "CAA":
+		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCAA)
+		resp := dns_lookup(client, server, msg, rrtype, hostname)
+		if resp != nil {
+			text = format_caa(rrtype, resp)
+		}
 	case "CNAME":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCNAME)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
 			text = format_cname(rrtype, resp)
+		}
+	case "DNSKEY":
+		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeDNSKEY)
+		resp := dns_lookup(client, server, msg, rrtype, hostname)
+		if resp != nil {
+			text = format_dnskey(rrtype, resp)
 		}
 	case "MX":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeMX)
@@ -167,11 +181,31 @@ func format_aaaa(rrtype string, resp *dns.Msg) string {
 	return strings.Join(elts, "")
 }
 
+func format_caa(rrtype string, resp *dns.Msg) string {
+	var elts []string
+	for _, ans := range resp.Answer {
+		rr := ans.(*dns.CAA)
+		elts = append(elts, fmt.Sprintf("%s\t%d\t%s %s\n", rrtype, rr.Flag, rr.Tag, rr.Value))
+	}
+	sort.Strings(elts)
+	return strings.Join(elts, "")
+}
+
 func format_cname(rrtype string, resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		cname := ans.(*dns.CNAME)
 		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, cname.Target))
+	}
+	sort.Strings(elts)
+	return strings.Join(elts, "")
+}
+
+func format_dnskey(rrtype string, resp *dns.Msg) string {
+	var elts []string
+	for _, ans := range resp.Answer {
+		rr := ans.(*dns.DNSKEY)
+		elts = append(elts, fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Flags, rr.Protocol, rr.Algorithm, rr.PublicKey))
 	}
 	sort.Strings(elts)
 	return strings.Join(elts, "")
@@ -334,7 +368,11 @@ func parseArgs(args []string) (*Query, error) {
 	}
 
 	if query.Types == nil || len(query.Types) == 0 {
-		query.Types = DEFAULT_RRTYPES
+		if opts.All {
+			query.Types = SUPPORTED_RRTYPES
+		} else {
+			query.Types = DEFAULT_RRTYPES
+		}
 	}
 
 	if query.Server == "" {

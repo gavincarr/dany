@@ -16,6 +16,7 @@ func TestDefaults(t *testing.T) {
 	var hostnames = []string{
 		"openfusion.com.au",
 		"profound.net",
+		"shell.com",
 	}
 	for _, hostname := range hostnames {
 		golden := "testdata/" + hostname + ".golden"
@@ -62,6 +63,7 @@ func TestTypesParseArgs(t *testing.T) {
 		{"www.zoom.us", []string{"ns"}, "ns"},
 		{"www.zoom.us", []string{"cname"}, "cname"},
 		{"www.zoom.us", []string{"soa", "ns"}, "soa_ns"},
+		{"shell.com", []string{"caa", "dnskey"}, "caa_dnskey"},
 	}
 	for _, test := range tests {
 		golden := "testdata/" + test.hostname + "_" + test.label + ".golden"
