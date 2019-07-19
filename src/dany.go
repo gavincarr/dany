@@ -72,12 +72,12 @@ func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostnam
 	}
 	// Die on non-truncation exchange errors
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error (%s): %s", rrtype, err)
 	}
 	if resp != nil {
 		// Die on dns errors
 		if resp.Rcode != dns.RcodeSuccess {
-			log.Fatalf("Error in %s request for %q\n", rrtype, hostname)
+			log.Fatalf("Error (%s): %s", rrtype, dns.RcodeToString[resp.Rcode])
 		}
 		// Handle CNAMEs
 		ans := resp.Answer
@@ -291,6 +291,8 @@ func dany(query *Query) string {
 	// Do lookups, using resultStream to gather results
 	resultStream := make(chan Result, len(query.Types))
 	client := new(dns.Client)
+	// Set client timeouts (dial/read/write) to TIMEOUT_SECONDS / 2
+	client.Timeout = TIMEOUT_SECONDS / 2 * time.Second
 	for _, t := range query.Types {
 		go lookup(resultStream, client, strings.ToUpper(t), query.Hostname, query.Server)
 	}
