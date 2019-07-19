@@ -66,12 +66,12 @@ func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostnam
 		client.Net = "tcp"
 		resp, _, err = client.Exchange(msg, server)
 	}
-	// Die on non-truncation errors
+	// Die on non-truncation exchange errors
 	if err != nil {
 		log.Fatal(err)
 	}
 	if resp != nil {
-		// Fail on errors
+		// Die on dns errors
 		if resp.Rcode != dns.RcodeSuccess {
 			log.Fatalf("Error in %s request for %q\n", rrtype, hostname)
 		}
@@ -88,156 +88,156 @@ func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostnam
 	return resp
 }
 
-func lookup(rrtype, hostname string, ch chan<- string, client *dns.Client, server string) {
+func lookup(resultStream chan<- string, client *dns.Client, rrtype, hostname, server string) {
 	msg := new(dns.Msg)
 	msg.RecursionDesired = true
 
-	var text string
+	var results []string
 	switch rrtype {
 	case "A":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			text = format_a(rrtype, resp)
+			results = format_a(rrtype, resp)
 		}
 	case "AAAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeAAAA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			text = format_aaaa(rrtype, resp)
+			results = format_aaaa(rrtype, resp)
 		}
 	case "CAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCAA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			text = format_caa(rrtype, resp)
+			results = format_caa(rrtype, resp)
 		}
 	case "CNAME":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCNAME)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			text = format_cname(rrtype, resp)
+			results = format_cname(rrtype, resp)
 		}
 	case "DNSKEY":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeDNSKEY)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			text = format_dnskey(rrtype, resp)
+			results = format_dnskey(rrtype, resp)
 		}
 	case "MX":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeMX)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			text = format_mx(rrtype, resp)
+			results = format_mx(rrtype, resp)
 		}
 	case "NS":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNS)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			text = format_ns(rrtype, resp)
+			results = format_ns(rrtype, resp)
 		}
 	case "NSEC":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNSEC)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			text = format_nsec(rrtype, resp)
+			results = format_nsec(rrtype, resp)
 		}
 	case "SOA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSOA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			text = format_soa(rrtype, resp)
+			results = format_soa(rrtype, resp)
 		}
 	case "SRV":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSRV)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			text = format_srv(rrtype, resp)
+			results = format_srv(rrtype, resp)
 		}
 	case "TXT":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeTXT)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			text = format_txt(rrtype, resp)
+			results = format_txt(rrtype, resp)
 		}
 	default:
 		log.Fatalf("Error: unhandled type %q", rrtype)
 	}
 
-	ch <- text
+	sort.Strings(results)
+	resultStream <- strings.Join(results, "")
 }
 
-func format_a(rrtype string, resp *dns.Msg) string {
+func format_a(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.A)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, rr.A.String()))
+		elts = append(elts,
+			fmt.Sprintf("%s\t\t%s\n", rrtype, rr.A.String()))
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, "")
+	return elts
 }
 
-func format_aaaa(rrtype string, resp *dns.Msg) string {
+func format_aaaa(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.AAAA)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, rr.AAAA.String()))
+		elts = append(elts,
+			fmt.Sprintf("%s\t\t%s\n", rrtype, rr.AAAA.String()))
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, "")
+	return elts
 }
 
-func format_caa(rrtype string, resp *dns.Msg) string {
+func format_caa(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.CAA)
-		elts = append(elts, fmt.Sprintf("%s\t%d\t%s %s\n", rrtype, rr.Flag, rr.Tag, rr.Value))
+		elts = append(elts,
+			fmt.Sprintf("%s\t%d\t%s %s\n", rrtype, rr.Flag, rr.Tag, rr.Value))
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, "")
+	return elts
 }
 
-func format_cname(rrtype string, resp *dns.Msg) string {
+func format_cname(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.CNAME)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, rr.Target))
+		elts = append(elts,
+			fmt.Sprintf("%s\t\t%s\n", rrtype, rr.Target))
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, "")
+	return elts
 }
 
-func format_dnskey(rrtype string, resp *dns.Msg) string {
+func format_dnskey(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.DNSKEY)
-		elts = append(elts, fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Flags, rr.Protocol, rr.Algorithm, rr.PublicKey))
+		elts = append(elts,
+			fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Flags, rr.Protocol, rr.Algorithm, rr.PublicKey))
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, "")
+	return elts
 }
 
-func format_mx(rrtype string, resp *dns.Msg) string {
+func format_mx(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.MX)
-		elts = append(elts, fmt.Sprintf("%s\t%d\t%s\n", rrtype, rr.Preference, rr.Mx))
+		elts = append(elts,
+			fmt.Sprintf("%s\t%d\t%s\n", rrtype, rr.Preference, rr.Mx))
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, "")
+	return elts
 }
 
-func format_ns(rrtype string, resp *dns.Msg) string {
+func format_ns(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.NS)
 		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, rr.Ns))
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, "")
+	return elts
 }
 
-func format_nsec(rrtype string, resp *dns.Msg) string {
+func format_nsec(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.NSEC)
@@ -248,38 +248,37 @@ func format_nsec(rrtype string, resp *dns.Msg) string {
 		s += "\n"
 		elts = append(elts, s)
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, "")
+	return elts
 }
 
-func format_soa(rrtype string, resp *dns.Msg) string {
+func format_soa(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.SOA)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s %s\n", rrtype, rr.Ns, rr.Mbox))
+		elts = append(elts,
+			fmt.Sprintf("%s\t\t%s %s\n", rrtype, rr.Ns, rr.Mbox))
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, "")
+	return elts
 }
 
-func format_srv(rrtype string, resp *dns.Msg) string {
+func format_srv(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.SRV)
-		elts = append(elts, fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Priority, rr.Weight, rr.Port, rr.Target))
+		elts = append(elts,
+			fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Priority, rr.Weight, rr.Port, rr.Target))
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, "")
+	return elts
 }
 
-func format_txt(rrtype string, resp *dns.Msg) string {
+func format_txt(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.TXT)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, strings.Join(rr.Txt, "")))
+		elts = append(elts,
+			fmt.Sprintf("%s\t\t%s\n", rrtype, strings.Join(rr.Txt, "")))
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, "")
+	return elts
 }
 
 func dany(query *Query) string {
@@ -288,7 +287,7 @@ func dany(query *Query) string {
 	// Do lookups, using resultStream to gather results
 	resultStream := make(chan string, len(query.Types))
 	for _, t := range query.Types {
-		go lookup(strings.ToUpper(t), query.Hostname, resultStream, client, query.Server)
+		go lookup(resultStream, client, strings.ToUpper(t), query.Hostname, query.Server)
 	}
 
 	var results []string
