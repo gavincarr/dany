@@ -29,6 +29,10 @@ type Query struct {
 	Server   string
 	Types    []string
 }
+type Result struct {
+	Type    string
+	Results string
+}
 
 // Options
 var opts struct {
@@ -88,7 +92,7 @@ func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostnam
 	return resp
 }
 
-func lookup(resultStream chan<- string, client *dns.Client, rrtype, hostname, server string) {
+func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname, server string) {
 	msg := new(dns.Msg)
 	msg.RecursionDesired = true
 
@@ -165,7 +169,9 @@ func lookup(resultStream chan<- string, client *dns.Client, rrtype, hostname, se
 	}
 
 	sort.Strings(results)
-	resultStream <- strings.Join(results, "")
+
+	res := Result{Type: rrtype, Results: strings.Join(results, "")}
+	resultStream <- res
 }
 
 func format_a(rrtype string, resp *dns.Msg) []string {
@@ -282,10 +288,9 @@ func format_txt(rrtype string, resp *dns.Msg) []string {
 }
 
 func dany(query *Query) string {
-	client := new(dns.Client)
-
 	// Do lookups, using resultStream to gather results
-	resultStream := make(chan string, len(query.Types))
+	resultStream := make(chan Result, len(query.Types))
+	client := new(dns.Client)
 	for _, t := range query.Types {
 		go lookup(resultStream, client, strings.ToUpper(t), query.Hostname, query.Server)
 	}
@@ -297,8 +302,10 @@ loop:
 		select {
 		// Get results from resultStream
 		case res := <-resultStream:
-			if res != "" {
-				results = append(results, res)
+			if res.Results != "" {
+				results = append(results, res.Results)
+			} else {
+				vprintf("%s query returned no data\n", res.Type)
 			}
 			count++
 			if count >= len(query.Types) {
