@@ -64,12 +64,6 @@ func vprintf(format string, args ...interface{}) {
 
 func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname string) *dns.Msg {
 	resp, _, err := client.Exchange(msg, server)
-	// Handle message truncation with udp
-	if resp != nil && resp.Truncated && client.Net != "tcp" {
-		vprintf("%s lookup truncated, retrying using TCP\n", rrtype)
-		client.Net = "tcp"
-		resp, _, err = client.Exchange(msg, server)
-	}
 	// Die on non-truncation exchange errors
 	if err != nil {
 		log.Fatalf("Error (%s): %s", rrtype, err)
@@ -291,6 +285,8 @@ func dany(query *Query) string {
 	// Do lookups, using resultStream to gather results
 	resultStream := make(chan Result, len(query.Types))
 	client := new(dns.Client)
+	// We're often going to want long records like TXT or DNSKEY, so let's just always use tcp
+	client.Net = "tcp"
 	// Set client timeouts (dial/read/write) to TIMEOUT_SECONDS / 2
 	client.Timeout = TIMEOUT_SECONDS / 2 * time.Second
 	for _, t := range query.Types {
