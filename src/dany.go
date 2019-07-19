@@ -22,7 +22,9 @@ const TIMEOUT_SECONDS = 10
 const DNS_PORT = "53"
 
 var DEFAULT_RRTYPES = []string{"A", "AAAA", "MX", "NS", "SOA", "TXT"}
-var SUPPORTED_RRTYPES = []string{"A", "AAAA", "CAA", "CNAME", "DNSKEY", "MX", "NS", "NSEC", "SOA", "SRV", "TXT"}
+var SUPPORTED_RRTYPES = []string{
+	"A", "AAAA", "CAA", "CNAME", "DNSKEY", "MX", "NS", "NSEC", "RRSIG", "SOA", "SRV", "TXT",
+}
 
 type Query struct {
 	Hostname string
@@ -64,7 +66,7 @@ func vprintf(format string, args ...interface{}) {
 
 func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname string) *dns.Msg {
 	resp, _, err := client.Exchange(msg, server)
-	// Die on non-truncation exchange errors
+	// Die on exchange errors
 	if err != nil {
 		log.Fatalf("Error (%s): %s", rrtype, err)
 	}
@@ -139,6 +141,12 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname, se
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
 			results = format_nsec(rrtype, resp)
+		}
+	case "RRSIG":
+		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeRRSIG)
+		resp := dns_lookup(client, server, msg, rrtype, hostname)
+		if resp != nil {
+			results = format_rrsig(rrtype, resp)
 		}
 	case "SOA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSOA)
@@ -247,6 +255,21 @@ func format_nsec(rrtype string, resp *dns.Msg) []string {
 		}
 		s += "\n"
 		elts = append(elts, s)
+	}
+	return elts
+}
+
+func format_rrsig(rrtype string, resp *dns.Msg) []string {
+	var elts []string
+	for _, ans := range resp.Answer {
+		rr := ans.(*dns.RRSIG)
+		elts = append(elts,
+			fmt.Sprintf("%s\t\t%s %d %d %d %s %s %d %s %s\n",
+				rrtype, dns.Type(rr.TypeCovered).String(),
+				rr.Algorithm, rr.Labels, rr.OrigTtl,
+				dns.TimeToString(rr.Expiration), dns.TimeToString(rr.Inception),
+				rr.KeyTag, rr.SignerName, rr.Signature,
+			))
 	}
 	return elts
 }
