@@ -30,9 +30,10 @@ type Query struct {
 	Hostname string
 	Server   string
 	Types    []string
+	Ptr      bool
 }
 type Result struct {
-	Type    string
+	Label   string
 	Results string
 }
 
@@ -40,6 +41,7 @@ type Result struct {
 var opts struct {
 	Verbose bool `short:"v" long:"verbose" description:"display verbose debug output"`
 	All     bool `short:"a" long:"all" description:"display all supported DNS records (rather than default set below)"`
+	Ptr     bool `short:"p" long:"ptr" description:"lookup and append ptr records to ip results"`
 	Args    struct {
 		Types    string `description:"comma-separated list of DNS resource types to lookup (case-insensitive)"`
 		Hostname string `description:"hostname/domain to lookup"`
@@ -64,6 +66,7 @@ func vprintf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "+ "+format, args...)
 }
 
+// Do an `rrtype` lookup on `hostname`, returning the dns response
 func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname string) *dns.Msg {
 	resp, _, err := client.Exchange(msg, server)
 	// Die on exchange errors
@@ -78,7 +81,8 @@ func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostnam
 		// Handle CNAMEs
 		ans := resp.Answer
 		if ans != nil && len(ans) > 0 && ans[0].Header().Rrtype == dns.TypeCNAME && rrtype != "CNAME" {
-			// dig reports CNAME targets and then requeries, but that seems too noisy for N rrtypes
+			// dig reports CNAME targets and then requeries, but that seems too noisy for N rrtypes,
+			// so just silently requery (except with --verbose)
 			cname := ans[0].(*dns.CNAME)
 			vprintf("%s %s lookup returned CNAME %q - requerying\n", hostname, rrtype, cname.Target)
 			msg.SetQuestion(dns.Fqdn(cname.Target), msg.Question[0].Qtype)
@@ -88,7 +92,10 @@ func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostnam
 	return resp
 }
 
-func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname, server string) {
+func lookup(resultStream chan<- Result, client *dns.Client, rrtype string, query *Query) {
+	hostname := query.Hostname
+	server := query.Server
+
 	msg := new(dns.Msg)
 	msg.RecursionDesired = true
 
@@ -98,13 +105,23 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname, se
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			results = format_a(rrtype, resp)
+			var ptr_map map[string]string
+			if query.Ptr {
+				ptr_map = ptr_lookup_all(client, server, rrtype, resp)
+				//vprintf("ptr_map: %v\n", ptr_map)
+			}
+			results = format_a(rrtype, resp, ptr_map)
 		}
 	case "AAAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeAAAA)
 		resp := dns_lookup(client, server, msg, rrtype, hostname)
 		if resp != nil {
-			results = format_aaaa(rrtype, resp)
+			var ptr_map map[string]string
+			if query.Ptr {
+				ptr_map = ptr_lookup_all(client, server, rrtype, resp)
+				//vprintf("ptr_map: %v\n", ptr_map)
+			}
+			results = format_aaaa(rrtype, resp, ptr_map)
 		}
 	case "CAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCAA)
@@ -172,26 +189,109 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname, se
 
 	sort.Strings(results)
 
-	res := Result{Type: rrtype, Results: strings.Join(results, "")}
+	res := Result{Label: rrtype, Results: strings.Join(results, "")}
 	resultStream <- res
 }
 
-func format_a(rrtype string, resp *dns.Msg) []string {
+func ptr_lookup_one(resultStream chan<- Result, client *dns.Client, server, ip, ip_arpa string) {
+	msg := new(dns.Msg)
+	msg.RecursionDesired = true
+	msg.SetQuestion(ip_arpa, dns.TypePTR)
+
+	resp, _, err := client.Exchange(msg, server)
+	// Die on exchange errors
+	if err != nil {
+		log.Fatalf("Error (%s PTR): %s", ip, err)
+	}
+	// Silently give up on dns errors (resp.Rcode != dns.RcodeSuccess)
+	if resp.Rcode != dns.RcodeSuccess {
+		vprintf("dns error on PTR lookup on %s: %s\n", ip, dns.RcodeToString[resp.Rcode])
+	}
+
+	var results string
+	if resp != nil {
+		results = format_ptr_append(resp)
+	}
+	result := Result{Label: ip, Results: results}
+	resultStream <- result
+}
+
+func ptr_lookup_all(client *dns.Client, server, rrtype string, resp *dns.Msg) map[string]string {
+	resultStream := make(chan Result)
+	ptr_map := make(map[string]string)
+
+	count := 0
+	for _, ans := range resp.Answer {
+		// Extract ip
+		var ip string
+		if rr, ok := ans.(*dns.A); ok {
+			ip = rr.A.String()
+		} else if rr, ok := ans.(*dns.AAAA); ok {
+			ip = rr.AAAA.String()
+		}
+
+		// Do PTR lookup
+		ip_arpa, err := dns.ReverseAddr(ip)
+		if err != nil {
+			vprintf("Warning: failed to convert ip %q to arpa form\n", ip)
+			continue
+		}
+
+		vprintf("doing %s PTR lookup on %s\n", rrtype, ip)
+		count++
+		go ptr_lookup_one(resultStream, client, server, ip, ip_arpa)
+	}
+
+loop:
+	for count > 0 {
+		select {
+		// Get results from resultStream
+		case res := <-resultStream:
+			if res.Results != "" {
+				ptr_map[res.Label] = res.Results
+			} else {
+				vprintf("%s query returned no data\n", res.Label+" PTR")
+			}
+			count--
+		// Timeout if some results just take too long
+		case <-time.After(TIMEOUT_SECONDS * time.Second):
+			break loop
+		}
+	}
+
+	return ptr_map
+}
+
+func format_a(rrtype string, resp *dns.Msg, ptr_map map[string]string) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.A)
+		ip := rr.A.String()
+		ptr_entry := ""
+		if ptr_map != nil {
+			if pe, ok := ptr_map[ip]; ok {
+				ptr_entry = "\t" + pe
+			}
+		}
 		elts = append(elts,
-			fmt.Sprintf("%s\t\t%s\n", rrtype, rr.A.String()))
+			fmt.Sprintf("%s\t\t%s%s\n", rrtype, ip, ptr_entry))
 	}
 	return elts
 }
 
-func format_aaaa(rrtype string, resp *dns.Msg) []string {
+func format_aaaa(rrtype string, resp *dns.Msg, ptr_map map[string]string) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.AAAA)
+		ip := rr.AAAA.String()
+		ptr_entry := ""
+		if ptr_map != nil {
+			if pe, ok := ptr_map[ip]; ok {
+				ptr_entry = "\t" + pe
+			}
+		}
 		elts = append(elts,
-			fmt.Sprintf("%s\t\t%s\n", rrtype, rr.AAAA.String()))
+			fmt.Sprintf("%s\t\t%s%s\n", rrtype, ip, ptr_entry))
 	}
 	return elts
 }
@@ -259,6 +359,16 @@ func format_nsec(rrtype string, resp *dns.Msg) []string {
 	return elts
 }
 
+func format_ptr_append(resp *dns.Msg) string {
+	var elts []string
+	for _, ans := range resp.Answer {
+		rr := ans.(*dns.PTR)
+		elts = append(elts, rr.Ptr)
+	}
+	sort.Strings(elts)
+	return strings.Join(elts, " ")
+}
+
 func format_rrsig(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
@@ -313,7 +423,7 @@ func dany(query *Query) string {
 	// Set client timeouts (dial/read/write) to TIMEOUT_SECONDS / 2
 	client.Timeout = TIMEOUT_SECONDS / 2 * time.Second
 	for _, t := range query.Types {
-		go lookup(resultStream, client, strings.ToUpper(t), query.Hostname, query.Server)
+		go lookup(resultStream, client, strings.ToUpper(t), query)
 	}
 
 	var results []string
@@ -326,7 +436,7 @@ loop:
 			if res.Results != "" {
 				results = append(results, res.Results)
 			} else {
-				vprintf("%s query returned no data\n", res.Type)
+				vprintf("%s query returned no data\n", res.Label)
 			}
 			count++
 			if count >= len(query.Types) {
@@ -346,6 +456,7 @@ loop:
 
 func parseArgs(args []string) (*Query, error) {
 	query := new(Query)
+	query.Ptr = opts.Ptr
 
 	// Regexps
 	re_at_prefix := regexp.MustCompile("^@")

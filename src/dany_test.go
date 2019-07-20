@@ -104,3 +104,40 @@ func TestTypesParseArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestPtr(t *testing.T) {
+	var tests = []string{
+		"att.com",
+		"cisco.com",
+		"hpe.com",
+	}
+	for _, hostname := range tests {
+		golden := "testdata/" + hostname + "_ptr.golden"
+		query, err := parseArgs([]string{hostname, "a,aaaa"})
+		if err != nil {
+			log.Fatal(err)
+		}
+		query.Ptr = true
+		actual := dany(query)
+
+		// Read expected output from golden file
+		expected, err := ioutil.ReadFile(golden)
+		if err != nil {
+			t.Fatalf("failed reading .golden: %s\n", err)
+		}
+
+		// Test
+		if actual != string(expected) {
+			// Support -u/--update
+			if *update {
+				if err := ioutil.WriteFile(golden, []byte(actual), 0644); err != nil {
+					t.Fatalf("failed to update %q golden file: %s\n", golden, err)
+				}
+			} else {
+				// Otherwise report errors
+				t.Errorf("%q output errors, default types:\nactual:\n%s\nexpected:\n%s\n",
+					hostname, actual, string(expected))
+			}
+		}
+	}
+}
