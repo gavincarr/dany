@@ -431,12 +431,22 @@ func dany(query *Query) string {
 	client.Net = "tcp"
 	// Set client timeouts (dial/read/write) to TIMEOUT_SECONDS / 2
 	client.Timeout = TIMEOUT_SECONDS / 2 * time.Second
-	// Run lookups
+	// Run standard lookups
 	count := 0
 	for _, h := range query.Hostnames {
 		for _, t := range query.Types {
 			go lookup(resultStream, client, strings.ToUpper(t), h, query)
 			count++
+		}
+		// Add USD TXT lookups
+		if opts.Usd {
+			query.NonFatal = true
+			domain := h
+			for _, usd := range SUPPORTED_USDS {
+				h = usd + "." + domain
+				go lookup(resultStream, client, "TXT", h, query)
+				count++
+			}
 		}
 	}
 
@@ -593,19 +603,4 @@ func main() {
 	// Do lookups
 	results := dany(query)
 	fmt.Print(results)
-
-	// Do USD lookups
-	if opts.Usd {
-		domain := query.Hostnames[0]
-		query.Types = []string{"TXT"}
-		query.NonFatal = true
-		hostnames := []string{}
-		for _, usd := range SUPPORTED_USDS {
-			hostnames = append(hostnames, usd+"."+domain)
-		}
-		query.Hostnames = hostnames
-		vprintf("usd hostnames: %s\n", query.Hostnames)
-		results := dany(query)
-		fmt.Print(results)
-	}
 }
