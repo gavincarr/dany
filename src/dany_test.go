@@ -72,12 +72,12 @@ func TestTypesParseArgs(t *testing.T) {
 		// Randomise args
 		r := rand.New(rand.NewSource(time.Now().Unix()))
 		args := []string{test.hostname, "@8.8.8.8", strings.Join(test.types, ",")}
-		args_rand := make([]string, len(args))
+		argsRand := make([]string, len(args))
 		perm := r.Perm(len(args))
 		for i, randIndex := range perm {
-			args_rand[i] = args[randIndex]
+			argsRand[i] = args[randIndex]
 		}
-		query, err := parseArgs(args_rand)
+		query, err := parseArgs(argsRand)
 		if err != nil {
 			log.Fatal(err)
 		}
