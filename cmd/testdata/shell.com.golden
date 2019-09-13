@@ -1,0 +1,21 @@
+A		65.52.64.201
+MX	10	shell-com.mail.protection.outlook.com.
+NS		dns1.shell.com.
+NS		dns2.shell.com.
+NS		dns3.shell.com.
+SOA		dns1.shell.com. dns.shell.com.
+TXT		5rd5scsii7robjjqc7kc18nmjs
+TXT		MS=ms30427294
+TXT		MS=ms99377552
+TXT		adobe-idp-site-verification=2dcd60bb-a70f-4f4c-9832-e36e4f08745e
+TXT		docusign=47717a16-0808-482b-b670-362c050ee218
+TXT		docusign=ebc4433c-7318-4b65-b3cf-c4d01acf5b55
+TXT		facebook-domain-verification=9heyxqkbm29g1op8lv4gvr8vafd120
+TXT		google-site-verification=2RWUzwfEqaFFEu-YXOetJGyDYW_jM1QzfbK63hd_Qec
+TXT		google-site-verification=2s2GEJMfRmvca1hw1CnOq82WxrcGeoo396oQyhKa5Xw
+TXT		google-site-verification=EcidcBpltmEwAmrgzFR03n-iXidgufyCZ-usg3dJbT0
+TXT		google-site-verification=SSg3QkpypwyTI_ZhtH8ZBllqi77LvAPw65i7X_wC-40
+TXT		pardot270112=15e5e42b1e301512adf3e51a8a7605206daec3bc1aa68afa18f90b2c8634424d
+TXT		spf2.0/prainclude:biggroup.trclient.com?all
+TXT		v=spf1 include:_spf.shell.com include:_spf1.shell.com include:_spf2.shell.com include:et._spf.pardot.com include:spf.protection.outlook.com include:_spf.salesforce.com include:_customers.moreover.com -all
+TXT		x7idUCqz9nWCEY0CcyH2/URUlRj3Hzo9Vfm8JmQdziLc1EEjjy+rRjBGMqI0Nn47Ru8/sDAOvHiuOZQ96IbeYQ==

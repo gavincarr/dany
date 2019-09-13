@@ -9,7 +9,7 @@
 /delta/applied/*
 /dist/*
 /node_modules/*
-/pkg/*
+/pkg/linux_amd64/*
 /src/dany
 /src/*.*/
 /var/*
