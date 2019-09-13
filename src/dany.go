@@ -18,14 +18,14 @@ import (
 	"github.com/miekg/dns"
 )
 
-const TIMEOUT_SECONDS = 10
-const DNS_PORT = "53"
+const timeoutSeconds = 10
+const dnsPort = "53"
 
-var DEFAULT_RRTYPES = []string{"A", "AAAA", "MX", "NS", "SOA", "TXT"}
-var SUPPORTED_RRTYPES = []string{
+var defaultRRTypes = []string{"A", "AAAA", "MX", "NS", "SOA", "TXT"}
+var supportedRRTypes = []string{
 	"A", "AAAA", "CAA", "CNAME", "DNSKEY", "MX", "NS", "NSEC", "RRSIG", "SOA", "SRV", "TXT",
 }
-var SUPPORTED_USDS = []string{
+var supportedUSDs = []string{
 	"_dmarc", "_domainkey", "_mta-sts",
 }
 
@@ -59,9 +59,9 @@ var parser = flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
 
 func usage() {
 	parser.WriteHelp(os.Stderr)
-	fmt.Fprintf(os.Stderr, "\nDefault DNS resource types: %s\n", strings.Join(DEFAULT_RRTYPES, ","))
-	fmt.Fprintf(os.Stderr, "Supported DNS resource types: %s\n", strings.Join(SUPPORTED_RRTYPES, ","))
-	fmt.Fprintf(os.Stderr, "Supported underscore-subdomains with --usd: %s\n", strings.Join(SUPPORTED_USDS, ","))
+	fmt.Fprintf(os.Stderr, "\nDefault DNS resource types: %s\n", strings.Join(defaultRRTypes, ","))
+	fmt.Fprintf(os.Stderr, "Supported DNS resource types: %s\n", strings.Join(supportedRRTypes, ","))
+	fmt.Fprintf(os.Stderr, "Supported underscore-subdomains with --usd: %s\n", strings.Join(supportedUSDs, ","))
 	os.Exit(2)
 }
 
@@ -73,7 +73,7 @@ func vprintf(format string, args ...interface{}) {
 }
 
 // Do an `rrtype` lookup on `hostname`, returning the dns response
-func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname string, nonFatal bool) *dns.Msg {
+func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname string, nonFatal bool) *dns.Msg {
 	resp, _, err := client.Exchange(msg, server)
 	// Die on exchange errors
 	if err != nil {
@@ -95,7 +95,7 @@ func dns_lookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostnam
 			cname := ans[0].(*dns.CNAME)
 			vprintf("%s %s lookup returned CNAME %q - requerying\n", hostname, rrtype, cname.Target)
 			msg.SetQuestion(dns.Fqdn(cname.Target), msg.Question[0].Qtype)
-			return dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+			return dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		}
 	}
 	return resp
@@ -112,85 +112,85 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 	switch rrtype {
 	case "A":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			var ptr_map map[string]string
+			var ptrMap map[string]string
 			if query.Ptr {
-				ptr_map = ptr_lookup_all(client, server, rrtype, resp)
-				//vprintf("ptr_map: %v\n", ptr_map)
+				ptrMap = ptrLookupAll(client, server, rrtype, resp)
+				//vprintf("ptrMap: %v\n", ptrMap)
 			}
-			results = format_a(rrtype, resp, ptr_map)
+			results = formatA(rrtype, resp, ptrMap)
 		}
 	case "AAAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeAAAA)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			var ptr_map map[string]string
+			var ptrMap map[string]string
 			if query.Ptr {
-				ptr_map = ptr_lookup_all(client, server, rrtype, resp)
-				//vprintf("ptr_map: %v\n", ptr_map)
+				ptrMap = ptrLookupAll(client, server, rrtype, resp)
+				//vprintf("ptrMap: %v\n", ptrMap)
 			}
-			results = format_aaaa(rrtype, resp, ptr_map)
+			results = formatAAAA(rrtype, resp, ptrMap)
 		}
 	case "CAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCAA)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			results = format_caa(rrtype, resp)
+			results = formatCAA(rrtype, resp)
 		}
 	case "CNAME":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCNAME)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			results = format_cname(rrtype, resp)
+			results = formatCNAME(rrtype, resp)
 		}
 	case "DNSKEY":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeDNSKEY)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			results = format_dnskey(rrtype, resp)
+			results = formatDNSKEY(rrtype, resp)
 		}
 	case "MX":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeMX)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			results = format_mx(rrtype, resp)
+			results = formatMX(rrtype, resp)
 		}
 	case "NS":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNS)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			results = format_ns(rrtype, resp)
+			results = formatNS(rrtype, resp)
 		}
 	case "NSEC":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNSEC)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			results = format_nsec(rrtype, resp)
+			results = formatNSEC(rrtype, resp)
 		}
 	case "RRSIG":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeRRSIG)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			results = format_rrsig(rrtype, resp)
+			results = formatRRSIG(rrtype, resp)
 		}
 	case "SOA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSOA)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			results = format_soa(rrtype, resp)
+			results = formatSOA(rrtype, resp)
 		}
 	case "SRV":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSRV)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			results = format_srv(rrtype, resp)
+			results = formatSRV(rrtype, resp)
 		}
 	case "TXT":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeTXT)
-		resp := dns_lookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp := dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		if resp != nil {
-			results = format_txt(rrtype, resp)
+			results = formatTXT(rrtype, resp)
 		}
 	default:
 		log.Fatalf("Error: unhandled type %q", rrtype)
@@ -202,10 +202,10 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 	resultStream <- res
 }
 
-func ptr_lookup_one(resultStream chan<- Result, client *dns.Client, server, ip, ip_arpa string) {
+func ptrLookupOne(resultStream chan<- Result, client *dns.Client, server, ip, ipArpa string) {
 	msg := new(dns.Msg)
 	msg.RecursionDesired = true
-	msg.SetQuestion(ip_arpa, dns.TypePTR)
+	msg.SetQuestion(ipArpa, dns.TypePTR)
 
 	resp, _, err := client.Exchange(msg, server)
 	// Die on exchange errors
@@ -219,15 +219,15 @@ func ptr_lookup_one(resultStream chan<- Result, client *dns.Client, server, ip, 
 
 	var results string
 	if resp != nil {
-		results = format_ptr_append(resp)
+		results = formatPTRAppend(resp)
 	}
 	result := Result{Label: ip, Results: results}
 	resultStream <- result
 }
 
-func ptr_lookup_all(client *dns.Client, server, rrtype string, resp *dns.Msg) map[string]string {
+func ptrLookupAll(client *dns.Client, server, rrtype string, resp *dns.Msg) map[string]string {
 	resultStream := make(chan Result)
-	ptr_map := make(map[string]string)
+	ptrMap := make(map[string]string)
 
 	count := 0
 	for _, ans := range resp.Answer {
@@ -240,7 +240,7 @@ func ptr_lookup_all(client *dns.Client, server, rrtype string, resp *dns.Msg) ma
 		}
 
 		// Do PTR lookup
-		ip_arpa, err := dns.ReverseAddr(ip)
+		ipArpa, err := dns.ReverseAddr(ip)
 		if err != nil {
 			vprintf("Warning: failed to convert ip %q to arpa form\n", ip)
 			continue
@@ -248,7 +248,7 @@ func ptr_lookup_all(client *dns.Client, server, rrtype string, resp *dns.Msg) ma
 
 		vprintf("doing %s PTR lookup on %s\n", rrtype, ip)
 		count++
-		go ptr_lookup_one(resultStream, client, server, ip, ip_arpa)
+		go ptrLookupOne(resultStream, client, server, ip, ipArpa)
 	}
 
 loop:
@@ -257,55 +257,55 @@ loop:
 		// Get results from resultStream
 		case res := <-resultStream:
 			if res.Results != "" {
-				ptr_map[res.Label] = res.Results
+				ptrMap[res.Label] = res.Results
 			} else {
 				vprintf("%s query returned no data\n", res.Label+" PTR")
 			}
 			count--
 		// Timeout if some results just take too long
-		case <-time.After(TIMEOUT_SECONDS * time.Second):
+		case <-time.After(timeoutSeconds * time.Second):
 			break loop
 		}
 	}
 
-	return ptr_map
+	return ptrMap
 }
 
-func format_a(rrtype string, resp *dns.Msg, ptr_map map[string]string) []string {
+func formatA(rrtype string, resp *dns.Msg, ptrMap map[string]string) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.A)
 		ip := rr.A.String()
-		ptr_entry := ""
-		if ptr_map != nil {
-			if pe, ok := ptr_map[ip]; ok {
-				ptr_entry = "\t" + pe
+		ptrEntry := ""
+		if ptrMap != nil {
+			if pe, ok := ptrMap[ip]; ok {
+				ptrEntry = "\t" + pe
 			}
 		}
 		elts = append(elts,
-			fmt.Sprintf("%s\t\t%s%s\n", rrtype, ip, ptr_entry))
+			fmt.Sprintf("%s\t\t%s%s\n", rrtype, ip, ptrEntry))
 	}
 	return elts
 }
 
-func format_aaaa(rrtype string, resp *dns.Msg, ptr_map map[string]string) []string {
+func formatAAAA(rrtype string, resp *dns.Msg, ptrMap map[string]string) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.AAAA)
 		ip := rr.AAAA.String()
-		ptr_entry := ""
-		if ptr_map != nil {
-			if pe, ok := ptr_map[ip]; ok {
-				ptr_entry = "\t" + pe
+		ptrEntry := ""
+		if ptrMap != nil {
+			if pe, ok := ptrMap[ip]; ok {
+				ptrEntry = "\t" + pe
 			}
 		}
 		elts = append(elts,
-			fmt.Sprintf("%s\t\t%s%s\n", rrtype, ip, ptr_entry))
+			fmt.Sprintf("%s\t\t%s%s\n", rrtype, ip, ptrEntry))
 	}
 	return elts
 }
 
-func format_caa(rrtype string, resp *dns.Msg) []string {
+func formatCAA(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.CAA)
@@ -315,7 +315,7 @@ func format_caa(rrtype string, resp *dns.Msg) []string {
 	return elts
 }
 
-func format_cname(rrtype string, resp *dns.Msg) []string {
+func formatCNAME(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.CNAME)
@@ -325,7 +325,7 @@ func format_cname(rrtype string, resp *dns.Msg) []string {
 	return elts
 }
 
-func format_dnskey(rrtype string, resp *dns.Msg) []string {
+func formatDNSKEY(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.DNSKEY)
@@ -335,7 +335,7 @@ func format_dnskey(rrtype string, resp *dns.Msg) []string {
 	return elts
 }
 
-func format_mx(rrtype string, resp *dns.Msg) []string {
+func formatMX(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.MX)
@@ -345,7 +345,7 @@ func format_mx(rrtype string, resp *dns.Msg) []string {
 	return elts
 }
 
-func format_ns(rrtype string, resp *dns.Msg) []string {
+func formatNS(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.NS)
@@ -354,7 +354,7 @@ func format_ns(rrtype string, resp *dns.Msg) []string {
 	return elts
 }
 
-func format_nsec(rrtype string, resp *dns.Msg) []string {
+func formatNSEC(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.NSEC)
@@ -368,7 +368,7 @@ func format_nsec(rrtype string, resp *dns.Msg) []string {
 	return elts
 }
 
-func format_ptr_append(resp *dns.Msg) string {
+func formatPTRAppend(resp *dns.Msg) string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.PTR)
@@ -378,7 +378,7 @@ func format_ptr_append(resp *dns.Msg) string {
 	return strings.Join(elts, " ")
 }
 
-func format_rrsig(rrtype string, resp *dns.Msg) []string {
+func formatRRSIG(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.RRSIG)
@@ -393,7 +393,7 @@ func format_rrsig(rrtype string, resp *dns.Msg) []string {
 	return elts
 }
 
-func format_soa(rrtype string, resp *dns.Msg) []string {
+func formatSOA(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.SOA)
@@ -403,7 +403,7 @@ func format_soa(rrtype string, resp *dns.Msg) []string {
 	return elts
 }
 
-func format_srv(rrtype string, resp *dns.Msg) []string {
+func formatSRV(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.SRV)
@@ -413,7 +413,7 @@ func format_srv(rrtype string, resp *dns.Msg) []string {
 	return elts
 }
 
-func format_txt(rrtype string, resp *dns.Msg) []string {
+func formatTXT(rrtype string, resp *dns.Msg) []string {
 	var elts []string
 	for _, ans := range resp.Answer {
 		rr := ans.(*dns.TXT)
@@ -429,8 +429,8 @@ func dany(query *Query) string {
 	client := new(dns.Client)
 	// We're often going to want long records like TXT or DNSKEY, so let's just always use tcp
 	client.Net = "tcp"
-	// Set client timeouts (dial/read/write) to TIMEOUT_SECONDS / 2
-	client.Timeout = TIMEOUT_SECONDS / 2 * time.Second
+	// Set client timeouts (dial/read/write) to timeoutSeconds / 2
+	client.Timeout = timeoutSeconds / 2 * time.Second
 	// Run standard lookups
 	count := 0
 	for _, h := range query.Hostnames {
@@ -442,7 +442,7 @@ func dany(query *Query) string {
 		if opts.Usd {
 			query.NonFatal = true
 			domain := h
-			for _, usd := range SUPPORTED_USDS {
+			for _, usd := range supportedUSDs {
 				h = usd + "." + domain
 				go lookup(resultStream, client, "TXT", h, query)
 				count++
@@ -466,7 +466,7 @@ loop:
 				break loop
 			}
 		// Timeout if some results just take too long
-		case <-time.After(TIMEOUT_SECONDS * time.Second):
+		case <-time.After(timeoutSeconds * time.Second):
 			break loop
 		}
 	}
@@ -483,43 +483,43 @@ func parseArgs(args []string) (*Query, error) {
 	query.Ptr = opts.Ptr
 
 	// Regexps
-	re_at_prefix := regexp.MustCompile("^@")
-	re_dot := regexp.MustCompile("\\.")
-	re_comma := regexp.MustCompile(",")
+	reAtPrefix := regexp.MustCompile("^@")
+	reDot := regexp.MustCompile("\\.")
+	reComma := regexp.MustCompile(",")
 
 	typeMap := make(map[string]bool)
-	for _, t := range SUPPORTED_RRTYPES {
+	for _, t := range supportedRRTypes {
 		typeMap[t] = true
 		typeMap[strings.ToLower(t)] = true
 	}
 
 	// Args: 1 domain (required); 1 @-prefixed server ip (optional); 1 comma-separated list of types (optional)
 	for _, arg := range args {
-		arg_is_rrtype := false
+		argIsRRType := false
 		// Check whether non-dotted args are bare RRtypes
-		if !re_dot.MatchString(arg) {
+		if !reDot.MatchString(arg) {
 			if _, ok := typeMap[arg]; ok {
-				arg_is_rrtype = true
+				argIsRRType = true
 			}
 		}
 		// Check for @<ip> server argument
-		if re_at_prefix.MatchString(arg) {
+		if reAtPrefix.MatchString(arg) {
 			if query.Server != "" {
 				err := errors.New(fmt.Sprintf("Error: argument %q looks like `@<ip>`, but we already have %q",
 					arg, query.Server))
 				return nil, err
 			}
-			server_ip := net.ParseIP(arg[1:])
-			if server_ip == nil {
+			serverIP := net.ParseIP(arg[1:])
+			if serverIP == nil {
 				err := errors.New(fmt.Sprintf("Error: argument %q looks like `@<ip>`, but unable to parse ip address",
 					arg))
 				return nil, err
 			}
-			query.Server = net.JoinHostPort(server_ip.String(), DNS_PORT)
+			query.Server = net.JoinHostPort(serverIP.String(), dnsPort)
 			continue
 		}
 		// Check for <RR>[,<RR>...] types argument
-		if arg_is_rrtype || re_comma.MatchString(arg) {
+		if argIsRRType || reComma.MatchString(arg) {
 			if len(query.Types) != 0 {
 				err := errors.New(fmt.Sprintf("Error: argument %q looks like types list, but we already have %q",
 					arg, query.Types))
@@ -552,9 +552,9 @@ func parseArgs(args []string) (*Query, error) {
 
 	if query.Types == nil || len(query.Types) == 0 {
 		if opts.All {
-			query.Types = SUPPORTED_RRTYPES
+			query.Types = supportedRRTypes
 		} else {
-			query.Types = DEFAULT_RRTYPES
+			query.Types = defaultRRTypes
 		}
 	}
 
