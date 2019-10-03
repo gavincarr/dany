@@ -5,6 +5,7 @@
 /DevNotes
 /TODO
 /bin/*
+/cmd/dany
 /data/*
 /delta/applied/*
 /dist/*

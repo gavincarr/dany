@@ -20,12 +20,14 @@ const dnsPort = "53"
 
 // Options
 var opts struct {
-	Verbose bool `short:"v" long:"verbose" description:"display verbose debug output"`
-	All     bool `short:"a" long:"all" description:"display all supported DNS records (rather than default set below)"`
-	Ptr     bool `short:"p" long:"ptr" description:"lookup and append ptr records to ip results"`
-	Usd     bool `short:"u" long:"usd" description:"also lookup TXT records of well-known underscore-subdomains of domain (see below)"`
-	Args    struct {
-		Types    string `description:"comma-separated list of DNS resource types to lookup (case-insensitive)"`
+	Verbose   bool   `short:"v" long:"verbose" description:"display verbose debug output"`
+	Types     string `short:"t" long:"types" description:"comma-separated list of DNS resource types to lookup (case-insensitive)"`
+	All       bool   `short:"a" long:"all" description:"display all supported DNS records (rather than default set below)"`
+	Ptr       bool   `short:"p" long:"ptr" description:"lookup and append ptr records to ip results"`
+	Usd       bool   `short:"u" long:"usd" description:"also lookup TXT records of well-known underscore-subdomains of domain (see below)"`
+	Resolvers string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
+	Server    string `short:"s" long:"server" description:"ip address of server to use as resolver"`
+	Args      struct {
 		Hostname string `description:"hostname/domain to lookup"`
 		Extra    []string
 	} `positional-args:"yes"`
@@ -55,16 +57,43 @@ func parseArgs(args []string) (*dany.Query, error) {
 	q.Ptr = opts.Ptr
 	q.Usd = opts.Usd
 
-	// Regexps
-	reAtPrefix := regexp.MustCompile("^@")
-	reDot := regexp.MustCompile("\\.")
-	reComma := regexp.MustCompile(",")
+	// Parse opts.Server
+	if opts.Server != "" {
+		serverIP := net.ParseIP(opts.Server)
+		if serverIP == nil {
+			err := fmt.Errorf("Error: unable to parse --server ip address %q", opts.Server)
+			return nil, err
+		}
+		q.Server = net.JoinHostPort(serverIP.String(), dnsPort)
+	}
 
+	// Parse opts.Types
 	typeMap := make(map[string]bool)
 	for _, t := range dany.SupportedRRTypes {
 		typeMap[t] = true
 		typeMap[strings.ToLower(t)] = true
 	}
+	if opts.Types != "" {
+		// Check all types are valid
+		types := strings.Split(opts.Types, ",")
+		var badTypes []string
+		for _, t := range types {
+			if _, ok := typeMap[t]; !ok {
+				badTypes = append(badTypes, t)
+			}
+		}
+		if len(badTypes) > 0 {
+			err := fmt.Errorf("Error: unsupported types found in %q: %s",
+				opts.Types, strings.Join(badTypes, ","))
+			return nil, err
+		}
+		q.Types = types
+	}
+
+	// Regexps
+	reAtPrefix := regexp.MustCompile("^@")
+	reDot := regexp.MustCompile("\\.")
+	reComma := regexp.MustCompile(",")
 
 	// Args: 1 domain (required); 1 @-prefixed server ip (optional); 1 comma-separated list of types (optional)
 	for _, arg := range args {
@@ -111,7 +140,7 @@ func parseArgs(args []string) (*dany.Query, error) {
 					arg, strings.Join(badTypes, ","))
 				return nil, err
 			}
-			q.Types = strings.Split(arg, ",")
+			q.Types = types
 			continue
 		}
 		// Otherwise assume hostname
@@ -157,14 +186,11 @@ func main() {
 
 	// Setup
 	log.SetFlags(0)
-	if opts.Args.Types == "" {
+	if opts.Args.Hostname == "" {
 		usage()
 	}
 	// Actually treat opts.Args as an unordered []string and parse into query elements
-	args := []string{opts.Args.Types}
-	if opts.Args.Hostname != "" {
-		args = append(args, opts.Args.Hostname)
-	}
+	args := []string{opts.Args.Hostname}
 	if len(opts.Args.Extra) > 0 {
 		args = append(args, opts.Args.Extra...)
 	}
