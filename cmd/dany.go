@@ -4,13 +4,16 @@
 package main
 
 import (
+	"bufio"
 	dany "dany/pkg"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	flags "github.com/jessevdk/go-flags"
 	"github.com/miekg/dns"
@@ -51,6 +54,38 @@ func vprintf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "+ "+format, args...)
 }
 
+type ResolverIPs []net.IP
+
+func loadResolvers(filename string) (ResolverIPs, error) {
+	fh, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	var resolvers ResolverIPs
+	scanner := bufio.NewScanner(fh)
+	for scanner.Scan() {
+		ipText := scanner.Text()
+		ip := net.ParseIP(ipText)
+		if ip == nil {
+			err := fmt.Errorf("Error: failed to parse --resolv ip address %q", ipText)
+			return nil, err
+		}
+		resolvers = append(resolvers, ip)
+	}
+	// Must have at least one resolver
+	if len(resolvers) == 0 {
+		err := fmt.Errorf("Error: no resolvers found in --resolv file %q", filename)
+		return nil, err
+	}
+	return resolvers, nil
+}
+
+func (resolvers ResolverIPs) choose() net.IP {
+	src := rand.NewSource(time.Now().UnixNano())
+	rinst := rand.New(src)
+	return resolvers[rinst.Intn(len(resolvers))]
+}
+
 func parseArgs(args []string) (*dany.Query, error) {
 	q := new(dany.Query)
 	q.NonFatal = false
@@ -65,6 +100,13 @@ func parseArgs(args []string) (*dany.Query, error) {
 			return nil, err
 		}
 		q.Server = net.JoinHostPort(serverIP.String(), dnsPort)
+	} else if opts.Resolvers != "" {
+		resolvers, err := loadResolvers(opts.Resolvers)
+		if err != nil {
+			return nil, err
+		}
+		//vprintf("resolvers: %v\n", resolvers)
+		q.Server = net.JoinHostPort(resolvers.choose().String(), dnsPort)
 	}
 
 	// Parse opts.Types
