@@ -23,14 +23,17 @@ var SupportedUSDs = []string{
 	"_dmarc", "_domainkey", "_mta-sts",
 }
 
+// dany Query - lookup Types for Hostname using Server
 type Query struct {
-	Server    string
-	Hostnames []string
-	Types     []string
-	NonFatal  bool
-	Ptr       bool
-	Usd       bool
+	Hostname string
+	Types    []string
+	Server   string
+	NonFatal bool
+	Ptr      bool
+	Usd      bool
 }
+
+// dany query Result
 type Result struct {
 	Label   string
 	Results string
@@ -404,20 +407,19 @@ func RunQuery(q *Query) string {
 	client.Timeout = timeoutSeconds / 2 * time.Second
 	// Run standard lookups
 	count := 0
-	for _, h := range q.Hostnames {
-		for _, t := range q.Types {
-			go lookup(resultStream, client, strings.ToUpper(t), h, q)
+	h := q.Hostname
+	for _, t := range q.Types {
+		go lookup(resultStream, client, strings.ToUpper(t), h, q)
+		count++
+	}
+	// Add USD TXT lookups
+	if q.Usd {
+		q.NonFatal = true
+		domain := h
+		for _, usd := range SupportedUSDs {
+			h = usd + "." + domain
+			go lookup(resultStream, client, "TXT", h, q)
 			count++
-		}
-		// Add USD TXT lookups
-		if q.Usd {
-			q.NonFatal = true
-			domain := h
-			for _, usd := range SupportedUSDs {
-				h = usd + "." + domain
-				go lookup(resultStream, client, "TXT", h, q)
-				count++
-			}
 		}
 	}
 

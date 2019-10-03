@@ -199,12 +199,12 @@ func parseArgs(args []string, testMode bool) (*dany.Query, error) {
 			continue
 		}
 		// Otherwise assume hostname
-		if len(q.Hostnames) >= 1 {
+		if q.Hostname != "" {
 			err := fmt.Errorf("Error: argument %q looks like hostname, but we already have %q",
-				arg, q.Hostnames[0])
+				arg, q.Hostname)
 			return nil, err
 		}
-		q.Hostnames = []string{arg}
+		q.Hostname = arg
 	}
 
 	if q.Types == nil || len(q.Types) == 0 {
@@ -224,7 +224,7 @@ func parseArgs(args []string, testMode bool) (*dany.Query, error) {
 	}
 
 	vprintf("server: %s\n", q.Server)
-	vprintf("hostname: %s\n", q.Hostnames[0])
+	vprintf("hostname: %s\n", q.Hostname)
 	vprintf("types: %v\n", q.Types)
 
 	return q, nil
