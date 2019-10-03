@@ -86,7 +86,23 @@ func (resolvers ResolverIPs) choose() net.IP {
 	return resolvers[rinst.Intn(len(resolvers))]
 }
 
-func parseArgs(args []string) (*dany.Query, error) {
+// Check all types exist in typeMaps - if not, return an error itemising those that don't
+func checkValidTypes(types []string, typeMap map[string]bool) error {
+	var badTypes []string
+	for _, t := range types {
+		if _, ok := typeMap[t]; !ok {
+			badTypes = append(badTypes, t)
+		}
+	}
+	if len(badTypes) > 0 {
+		err := fmt.Errorf("Error: unsupported types found in %q: %s",
+			strings.Join(types, ","), strings.Join(badTypes, ","))
+		return err
+	}
+	return nil
+}
+
+func parseArgs(args []string, testMode bool) (*dany.Query, error) {
 	q := new(dany.Query)
 	q.NonFatal = false
 	q.Ptr = opts.Ptr
@@ -116,17 +132,9 @@ func parseArgs(args []string) (*dany.Query, error) {
 		typeMap[strings.ToLower(t)] = true
 	}
 	if opts.Types != "" {
-		// Check all types are valid
 		types := strings.Split(opts.Types, ",")
-		var badTypes []string
-		for _, t := range types {
-			if _, ok := typeMap[t]; !ok {
-				badTypes = append(badTypes, t)
-			}
-		}
-		if len(badTypes) > 0 {
-			err := fmt.Errorf("Error: unsupported types found in %q: %s",
-				opts.Types, strings.Join(badTypes, ","))
+		err := checkValidTypes(types, typeMap)
+		if err != nil {
 			return nil, err
 		}
 		q.Types = types
@@ -147,11 +155,17 @@ func parseArgs(args []string) (*dany.Query, error) {
 			}
 		}
 		// Check for @<ip> server argument
+		// Deprecated: use -s <ip> option instead
 		if reAtPrefix.MatchString(arg) {
 			if q.Server != "" {
 				err := fmt.Errorf("Error: argument %q looks like `@<ip>`, but we already have %q",
 					arg, q.Server)
 				return nil, err
+			}
+			if !testMode {
+				// Deprecation warning
+				fmt.Fprintln(os.Stderr, "Warning: the @<ip> server argument is deprecated and will be removed in a future release")
+				fmt.Fprintln(os.Stderr, "Please use the '-s/--server <ip>' option instead")
 			}
 			serverIP := net.ParseIP(arg[1:])
 			if serverIP == nil {
@@ -163,23 +177,22 @@ func parseArgs(args []string) (*dany.Query, error) {
 			continue
 		}
 		// Check for <RR>[,<RR>...] types argument
+		// Deprecated: use -t <types> option instead
 		if argIsRRType || reComma.MatchString(arg) {
 			if len(q.Types) != 0 {
 				err := fmt.Errorf("Error: argument %q looks like types list, but we already have %q",
 					arg, q.Types)
 				return nil, err
 			}
+			if !testMode {
+				// Deprecation warning
+				fmt.Fprintln(os.Stderr, "Warning: the [Types] argument is deprecated and will be removed in a future release")
+				fmt.Fprintln(os.Stderr, "Please use the '-t/--types <types>' option instead")
+			}
 			// Check all types are valid
 			types := strings.Split(arg, ",")
-			var badTypes []string
-			for _, t := range types {
-				if _, ok := typeMap[t]; !ok {
-					badTypes = append(badTypes, t)
-				}
-			}
-			if len(badTypes) > 0 {
-				err := fmt.Errorf("Error: unsupported types found in %q: %s",
-					arg, strings.Join(badTypes, ","))
+			err := checkValidTypes(types, typeMap)
+			if err != nil {
 				return nil, err
 			}
 			q.Types = types
@@ -236,7 +249,7 @@ func main() {
 	if len(opts.Args.Extra) > 0 {
 		args = append(args, opts.Args.Extra...)
 	}
-	q, err := parseArgs(args)
+	q, err := parseArgs(args, false)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -21,7 +21,7 @@ func TestDefaults(t *testing.T) {
 	}
 	for _, hostname := range hostnames {
 		golden := "testdata/" + hostname + ".golden"
-		query, err := parseArgs([]string{hostname})
+		query, err := parseArgs([]string{hostname}, true)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -78,7 +78,7 @@ func TestTypesParseArgs(t *testing.T) {
 		for i, randIndex := range perm {
 			argsRand[i] = args[randIndex]
 		}
-		query, err := parseArgs(argsRand)
+		query, err := parseArgs(argsRand, true)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -114,7 +114,7 @@ func TestPtr(t *testing.T) {
 	}
 	for _, hostname := range tests {
 		golden := "testdata/" + hostname + "_ptr.golden"
-		query, err := parseArgs([]string{hostname, "a,aaaa"})
+		query, err := parseArgs([]string{hostname, "a,aaaa"}, true)
 		if err != nil {
 			log.Fatal(err)
 		}
