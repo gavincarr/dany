@@ -4,16 +4,13 @@
 package main
 
 import (
-	"bufio"
 	dany "dany/pkg"
 	"fmt"
 	"log"
-	"math/rand"
 	"net"
 	"os"
 	"regexp"
 	"strings"
-	"time"
 
 	flags "github.com/jessevdk/go-flags"
 	"github.com/miekg/dns"
@@ -22,7 +19,7 @@ import (
 const dnsPort = "53"
 
 // Options
-var opts struct {
+type Options struct {
 	Verbose   bool   `short:"v" long:"verbose" description:"display verbose debug output"`
 	Types     string `short:"t" long:"types" description:"comma-separated list of DNS resource types to lookup (case-insensitive)"`
 	All       bool   `short:"a" long:"all" description:"display all supported DNS records (rather than default set below)"`
@@ -35,6 +32,8 @@ var opts struct {
 		Extra    []string
 	} `positional-args:"yes"`
 }
+
+var opts Options
 
 // Disable flags.PrintErrors for more control
 var parser = flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
@@ -54,38 +53,6 @@ func vprintf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "+ "+format, args...)
 }
 
-type ResolverIPs []net.IP
-
-func loadResolvers(filename string) (ResolverIPs, error) {
-	fh, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	var resolvers ResolverIPs
-	scanner := bufio.NewScanner(fh)
-	for scanner.Scan() {
-		ipText := scanner.Text()
-		ip := net.ParseIP(ipText)
-		if ip == nil {
-			err := fmt.Errorf("Error: failed to parse --resolv ip address %q", ipText)
-			return nil, err
-		}
-		resolvers = append(resolvers, ip)
-	}
-	// Must have at least one resolver
-	if len(resolvers) == 0 {
-		err := fmt.Errorf("Error: no resolvers found in --resolv file %q", filename)
-		return nil, err
-	}
-	return resolvers, nil
-}
-
-func (resolvers ResolverIPs) choose() net.IP {
-	src := rand.NewSource(time.Now().UnixNano())
-	rinst := rand.New(src)
-	return resolvers[rinst.Intn(len(resolvers))]
-}
-
 // Check all types exist in typeMaps - if not, return an error itemising those that don't
 func checkValidTypes(types []string, typeMap map[string]bool) error {
 	var badTypes []string
@@ -102,7 +69,8 @@ func checkValidTypes(types []string, typeMap map[string]bool) error {
 	return nil
 }
 
-func parseArgs(args []string, testMode bool) (*dany.Query, error) {
+// Parse options and arguments and return a dany.Query object and a list of (real) arguments
+func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []string, error) {
 	q := new(dany.Query)
 	q.NonFatal = false
 	q.Ptr = opts.Ptr
@@ -113,16 +81,15 @@ func parseArgs(args []string, testMode bool) (*dany.Query, error) {
 		serverIP := net.ParseIP(opts.Server)
 		if serverIP == nil {
 			err := fmt.Errorf("Error: unable to parse --server ip address %q", opts.Server)
-			return nil, err
+			return nil, nil, err
 		}
-		q.Server = net.JoinHostPort(serverIP.String(), dnsPort)
+		q.Resolvers = dany.ResolverIPs{serverIP}
 	} else if opts.Resolvers != "" {
-		resolvers, err := loadResolvers(opts.Resolvers)
+		resolvers, err := dany.LoadResolvers(opts.Resolvers)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		//vprintf("resolvers: %v\n", resolvers)
-		q.Server = net.JoinHostPort(resolvers.choose().String(), dnsPort)
+		q.Resolvers = resolvers
 	}
 
 	// Parse opts.Types
@@ -135,17 +102,54 @@ func parseArgs(args []string, testMode bool) (*dany.Query, error) {
 		types := strings.Split(opts.Types, ",")
 		err := checkValidTypes(types, typeMap)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		q.Types = types
 	}
 
+	args, err := parseArgs(q, args, typeMap, testMode)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if q.Types == nil || len(q.Types) == 0 {
+		if opts.All {
+			q.Types = dany.SupportedRRTypes
+		} else {
+			q.Types = dany.DefaultRRTypes
+		}
+	}
+
+	if len(q.Resolvers) == 0 {
+		config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, server := range config.Servers {
+			serverIP := net.ParseIP(server)
+			if serverIP == nil {
+				err := fmt.Errorf("Error: unable to parse --server ip address %q", opts.Server)
+				return nil, nil, err
+			}
+			q.Resolvers = append(q.Resolvers, serverIP)
+		}
+	}
+
+	vprintf("resolvers: %v\n", q.Resolvers)
+	vprintf("types: %v\n", q.Types)
+
+	return q, args, nil
+}
+
+// Types and Server args are deprecated, but for now we have to keep checking for them
+func parseArgs(q *dany.Query, args []string, typeMap map[string]bool, testMode bool) ([]string, error) {
 	// Regexps
 	reAtPrefix := regexp.MustCompile("^@")
 	reDot := regexp.MustCompile("\\.")
 	reComma := regexp.MustCompile(",")
 
 	// Args: 1 domain (required); 1 @-prefixed server ip (optional); 1 comma-separated list of types (optional)
+	var newargs []string
 	for _, arg := range args {
 		argIsRRType := false
 		// Check whether non-dotted args are bare RRtypes
@@ -199,35 +203,10 @@ func parseArgs(args []string, testMode bool) (*dany.Query, error) {
 			continue
 		}
 		// Otherwise assume hostname
-		if q.Hostname != "" {
-			err := fmt.Errorf("Error: argument %q looks like hostname, but we already have %q",
-				arg, q.Hostname)
-			return nil, err
-		}
-		q.Hostname = arg
+		newargs = append(newargs, arg)
 	}
 
-	if q.Types == nil || len(q.Types) == 0 {
-		if opts.All {
-			q.Types = dany.SupportedRRTypes
-		} else {
-			q.Types = dany.DefaultRRTypes
-		}
-	}
-
-	if q.Server == "" {
-		config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
-		if err != nil {
-			return nil, err
-		}
-		q.Server = net.JoinHostPort(config.Servers[0], config.Port)
-	}
-
-	vprintf("server: %s\n", q.Server)
-	vprintf("hostname: %s\n", q.Hostname)
-	vprintf("types: %v\n", q.Types)
-
-	return q, nil
+	return newargs, nil
 }
 
 func main() {
@@ -244,16 +223,27 @@ func main() {
 	if opts.Args.Hostname == "" {
 		usage()
 	}
-	// Actually treat opts.Args as an unordered []string and parse into query elements
+
+	// Parse options into dany.Query (including deprecated option elts in args)
 	args := []string{opts.Args.Hostname}
 	if len(opts.Args.Extra) > 0 {
 		args = append(args, opts.Args.Extra...)
 	}
-	q, err := parseArgs(args, false)
+	q, args, err := parseOpts(opts, args, false)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Do lookups
-	fmt.Print(dany.RunQuery(q))
+	// Do lookups on remaining args (sequentially across hostnames)
+	for _, h := range args {
+		if q.Server == "" || len(q.Resolvers) > 1 {
+			q.Server = net.JoinHostPort(q.Resolvers.Choose().String(), dnsPort)
+			vprintf("server: %s\n", q.Server)
+		}
+
+		q.Hostname = h
+		vprintf("hostname: %s\n", q.Hostname)
+
+		fmt.Print(dany.RunQuery(q))
+	}
 }

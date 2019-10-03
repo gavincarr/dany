@@ -4,8 +4,12 @@
 package dany
 
 import (
+	"bufio"
 	"fmt"
 	"log"
+	"math/rand"
+	"net"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -23,14 +27,47 @@ var SupportedUSDs = []string{
 	"_dmarc", "_domainkey", "_mta-sts",
 }
 
+type ResolverIPs []net.IP
+
+func LoadResolvers(filename string) (ResolverIPs, error) {
+	fh, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	var resolvers ResolverIPs
+	scanner := bufio.NewScanner(fh)
+	for scanner.Scan() {
+		ipText := scanner.Text()
+		ip := net.ParseIP(ipText)
+		if ip == nil {
+			err := fmt.Errorf("Error: failed to parse --resolv ip address %q", ipText)
+			return nil, err
+		}
+		resolvers = append(resolvers, ip)
+	}
+	// Must have at least one resolver
+	if len(resolvers) == 0 {
+		err := fmt.Errorf("Error: no resolvers found in --resolv file %q", filename)
+		return nil, err
+	}
+	return resolvers, nil
+}
+
+func (resolvers ResolverIPs) Choose() net.IP {
+	src := rand.NewSource(time.Now().UnixNano())
+	rinst := rand.New(src)
+	return resolvers[rinst.Intn(len(resolvers))]
+}
+
 // dany Query - lookup Types for Hostname using Server
 type Query struct {
-	Hostname string
-	Types    []string
-	Server   string
-	NonFatal bool
-	Ptr      bool
-	Usd      bool
+	Hostname  string
+	Types     []string
+	Resolvers ResolverIPs
+	Server    string
+	NonFatal  bool
+	Ptr       bool
+	Usd       bool
 }
 
 // dany query Result
