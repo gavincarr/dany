@@ -54,9 +54,13 @@ func LoadResolvers(filename string) (ResolverIPs, error) {
 }
 
 func (resolvers ResolverIPs) Choose() net.IP {
-	src := rand.NewSource(time.Now().UnixNano())
-	rinst := rand.New(src)
-	return resolvers[rinst.Intn(len(resolvers))]
+	if len(resolvers) == 1 {
+		return resolvers[0]
+	} else {
+		src := rand.NewSource(time.Now().UnixNano())
+		rinst := rand.New(src)
+		return resolvers[rinst.Intn(len(resolvers))]
+	}
 }
 
 // dany Query - lookup Types for Hostname using Server

@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math/rand"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -19,12 +20,16 @@ func TestDefaults(t *testing.T) {
 		"profound.net",
 		"shell.com",
 	}
+
+	query, _, err := parseOpts(Options{}, []string{}, true)
+	if err != nil {
+		log.Fatal(err)
+	}
+	query.Server = net.JoinHostPort(query.Resolvers.Choose().String(), dnsPort)
+
 	for _, hostname := range hostnames {
 		golden := "testdata/" + hostname + ".golden"
-		query, err := parseArgs([]string{hostname}, true)
-		if err != nil {
-			log.Fatal(err)
-		}
+		query.Hostname = hostname
 		actual := dany.RunQuery(query)
 
 		// Read expected output from golden file
@@ -68,8 +73,10 @@ func TestTypesParseArgs(t *testing.T) {
 		{"comcast.com", []string{"nsec", "soa"}, "nsec_soa"},
 		{"comcast.com", []string{"rrsig", "soa"}, "rrsig_soa"},
 	}
+
 	for _, test := range tests {
 		golden := "testdata/" + test.hostname + "_" + test.label + ".golden"
+
 		// Randomise args
 		r := rand.New(rand.NewSource(time.Now().Unix()))
 		args := []string{test.hostname, "@8.8.8.8", strings.Join(test.types, ",")}
@@ -78,10 +85,13 @@ func TestTypesParseArgs(t *testing.T) {
 		for i, randIndex := range perm {
 			argsRand[i] = args[randIndex]
 		}
-		query, err := parseArgs(argsRand, true)
+		query, args, err := parseOpts(Options{}, argsRand, true)
 		if err != nil {
 			log.Fatal(err)
 		}
+		query.Server = net.JoinHostPort(query.Resolvers.Choose().String(), dnsPort)
+		query.Hostname = args[0]
+
 		actual := dany.RunQuery(query)
 
 		// Read expected output from golden file
@@ -112,13 +122,18 @@ func TestPtr(t *testing.T) {
 		"cisco.com",
 		"hpe.com",
 	}
+
+	query, _, err := parseOpts(Options{}, []string{}, true)
+	if err != nil {
+		log.Fatal(err)
+	}
+	query.Server = net.JoinHostPort(query.Resolvers.Choose().String(), dnsPort)
+	query.Ptr = true
+	query.Types = []string{"a", "aaaa"}
+
 	for _, hostname := range tests {
 		golden := "testdata/" + hostname + "_ptr.golden"
-		query, err := parseArgs([]string{hostname, "a,aaaa"}, true)
-		if err != nil {
-			log.Fatal(err)
-		}
-		query.Ptr = true
+		query.Hostname = hostname
 		actual := dany.RunQuery(query)
 
 		// Read expected output from golden file
