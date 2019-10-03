@@ -6,7 +6,6 @@ package dany
 import (
 	"fmt"
 	"log"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -30,31 +29,21 @@ type Query struct {
 	Types     []string
 	NonFatal  bool
 	Ptr       bool
+	Usd       bool
 }
 type Result struct {
 	Label   string
 	Results string
 }
 
-// Options
-var opts struct {
-	Verbose bool `short:"v" long:"verbose" description:"display verbose debug output"`
-	All     bool `short:"a" long:"all" description:"display all supported DNS records (rather than default set below)"`
-	Ptr     bool `short:"p" long:"ptr" description:"lookup and append ptr records to ip results"`
-	Usd     bool `short:"u" long:"usd" description:"also lookup TXT records of well-known underscore-subdomains of domain (see below)"`
-	Args    struct {
-		Types    string `description:"comma-separated list of DNS resource types to lookup (case-insensitive)"`
-		Hostname string `description:"hostname/domain to lookup"`
-		Extra    []string
-	} `positional-args:"yes"`
-}
-
+/*
 func vprintf(format string, args ...interface{}) {
 	if !opts.Verbose {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "+ "+format, args...)
 }
+*/
 
 // Do an `rrtype` lookup on `hostname`, returning the dns response
 func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname string, nonFatal bool) *dns.Msg {
@@ -77,7 +66,7 @@ func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname
 			// dig reports CNAME targets and then requeries, but that seems too noisy for N rrtypes,
 			// so just silently requery (except with --verbose)
 			cname := ans[0].(*dns.CNAME)
-			vprintf("%s %s lookup returned CNAME %q - requerying\n", hostname, rrtype, cname.Target)
+			//vprintf("%s %s lookup returned CNAME %q - requerying\n", hostname, rrtype, cname.Target)
 			msg.SetQuestion(dns.Fqdn(cname.Target), msg.Question[0].Qtype)
 			return dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
 		}
@@ -101,7 +90,6 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 			var ptrMap map[string]string
 			if q.Ptr {
 				ptrMap = ptrLookupAll(client, server, rrtype, resp)
-				//vprintf("ptrMap: %v\n", ptrMap)
 			}
 			resultList = formatA(rrtype, resp, ptrMap)
 		}
@@ -112,7 +100,6 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 			var ptrMap map[string]string
 			if q.Ptr {
 				ptrMap = ptrLookupAll(client, server, rrtype, resp)
-				//vprintf("ptrMap: %v\n", ptrMap)
 			}
 			resultList = formatAAAA(rrtype, resp, ptrMap)
 		}
@@ -198,7 +185,7 @@ func ptrLookupOne(resultStream chan<- Result, client *dns.Client, server, ip, ip
 	}
 	// Silently give up on dns errors (resp.Rcode != dns.RcodeSuccess)
 	if resp.Rcode != dns.RcodeSuccess {
-		vprintf("dns error on PTR lookup on %s: %s\n", ip, dns.RcodeToString[resp.Rcode])
+		//vprintf("dns error on PTR lookup on %s: %s\n", ip, dns.RcodeToString[resp.Rcode])
 	}
 
 	var resultText string
@@ -226,11 +213,11 @@ func ptrLookupAll(client *dns.Client, server, rrtype string, resp *dns.Msg) map[
 		// Do PTR lookup
 		ipArpa, err := dns.ReverseAddr(ip)
 		if err != nil {
-			vprintf("Warning: failed to convert ip %q to arpa form\n", ip)
+			//vprintf("Warning: failed to convert ip %q to arpa form\n", ip)
 			continue
 		}
 
-		vprintf("doing %s PTR lookup on %s\n", rrtype, ip)
+		//vprintf("doing %s PTR lookup on %s\n", rrtype, ip)
 		count++
 		go ptrLookupOne(resultStream, client, server, ip, ipArpa)
 	}
@@ -243,7 +230,7 @@ loop:
 			if res.Results != "" {
 				ptrMap[res.Label] = res.Results
 			} else {
-				vprintf("%s query returned no data\n", res.Label+" PTR")
+				//vprintf("%s query returned no data\n", res.Label+" PTR")
 			}
 			count--
 		// Timeout if some results just take too long
@@ -423,7 +410,7 @@ func RunQuery(q *Query) string {
 			count++
 		}
 		// Add USD TXT lookups
-		if opts.Usd {
+		if q.Usd {
 			q.NonFatal = true
 			domain := h
 			for _, usd := range SupportedUSDs {
@@ -443,7 +430,7 @@ loop:
 			if res.Results != "" {
 				resultList = append(resultList, res.Results)
 			} else {
-				vprintf("%s query returned no data\n", res.Label)
+				//vprintf("%s query returned no data\n", res.Label)
 			}
 			count--
 			if count <= 0 {

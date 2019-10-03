@@ -53,6 +53,7 @@ func parseArgs(args []string) (*dany.Query, error) {
 	q := new(dany.Query)
 	q.NonFatal = false
 	q.Ptr = opts.Ptr
+	q.Usd = opts.Usd
 
 	// Regexps
 	reAtPrefix := regexp.MustCompile("^@")
