@@ -7,6 +7,7 @@ SOA		dns1.shell.com. dns.shell.com.
 TXT		5rd5scsii7robjjqc7kc18nmjs
 TXT		MS=ms30427294
 TXT		MS=ms99377552
+TXT		_globalsign-domain-verification=ziTj8EVYVXdk5tW_1ATqTWEVil8ft1dyWxew970BE1
 TXT		adobe-idp-site-verification=2dcd60bb-a70f-4f4c-9832-e36e4f08745e
 TXT		docusign=47717a16-0808-482b-b670-362c050ee218
 TXT		docusign=ebc4433c-7318-4b65-b3cf-c4d01acf5b55
