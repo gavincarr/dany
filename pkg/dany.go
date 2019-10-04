@@ -71,6 +71,7 @@ type Query struct {
 	NonFatal  bool
 	Ptr       bool
 	Usd       bool
+	Tag       bool
 }
 
 // dany query Result
@@ -216,8 +217,17 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 	}
 
 	sort.Strings(resultList)
+	var results string
+	if q.Tag && len(resultList) > 0 {
+		tag := hostname + "\t"
+		for _, r := range resultList {
+			results = results + tag + r
+		}
+	} else {
+		results = strings.Join(resultList, "")
+	}
 
-	res := Result{Label: rrtype, Results: strings.Join(resultList, ""), Error: err}
+	res := Result{Label: rrtype, Results: results, Error: err}
 	resultStream <- res
 }
 

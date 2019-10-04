@@ -25,11 +25,12 @@ type Options struct {
 	All       bool   `short:"a" long:"all" description:"display all supported DNS records (rather than default set below)"`
 	Ptr       bool   `short:"p" long:"ptr" description:"lookup and append ptr records to ip results"`
 	Usd       bool   `short:"u" long:"usd" description:"also lookup TXT records of well-known underscore-subdomains of domain (see below)"`
+	Tag       bool   `short:"T" long:"tag" description:"tag output lines with hostname (default to true if multiple hostnames)"`
 	Resolvers string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
 	Server    string `short:"s" long:"server" description:"ip address of server to use as resolver"`
 	Args      struct {
-		Hostname string `description:"hostname/domain to lookup"`
-		Extra    []string
+		Hostname  string   `description:"hostname/domain to lookup"`
+		Hostname2 []string `description:"additional hostnames/domains to lookup"`
 	} `positional-args:"yes"`
 }
 
@@ -75,6 +76,7 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 	q.NonFatal = false
 	q.Ptr = opts.Ptr
 	q.Usd = opts.Usd
+	q.Tag = opts.Tag
 
 	// Parse opts.Server
 	if opts.Server != "" {
@@ -226,12 +228,17 @@ func main() {
 
 	// Parse options into dany.Query (including deprecated option elts in args)
 	args := []string{opts.Args.Hostname}
-	if len(opts.Args.Extra) > 0 {
-		args = append(args, opts.Args.Extra...)
+	if len(opts.Args.Hostname2) > 0 {
+		args = append(args, opts.Args.Hostname2...)
 	}
 	q, args, err := parseOpts(opts, args, false)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	// Set q.Tag to true if multiple hostnames
+	if len(args) > 1 {
+		q.Tag = true
 	}
 
 	// Do lookups on remaining args (sequentially across hostnames)
