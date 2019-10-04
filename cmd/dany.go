@@ -244,6 +244,12 @@ func main() {
 		q.Hostname = h
 		vprintf("hostname: %s\n", q.Hostname)
 
-		fmt.Print(dany.RunQuery(q))
+		results, errors := dany.RunQuery(q)
+		if results != "" {
+			fmt.Fprint(os.Stdout, results)
+		}
+		if errors != "" {
+			fmt.Fprint(os.Stderr, errors)
+		}
 	}
 }

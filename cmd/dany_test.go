@@ -30,7 +30,10 @@ func TestDefaults(t *testing.T) {
 	for _, hostname := range hostnames {
 		golden := "testdata/" + hostname + ".golden"
 		query.Hostname = hostname
-		actual := dany.RunQuery(query)
+		actual, errors := dany.RunQuery(query)
+		if errors != "" {
+			t.Fatalf("RunQuery errors: %s\n", err)
+		}
 
 		// Read expected output from golden file
 		expected, err := ioutil.ReadFile(golden)
@@ -92,7 +95,10 @@ func TestTypesParseArgs(t *testing.T) {
 		query.Server = net.JoinHostPort(query.Resolvers.Choose().String(), dnsPort)
 		query.Hostname = args[0]
 
-		actual := dany.RunQuery(query)
+		actual, errors := dany.RunQuery(query)
+		if errors != "" {
+			t.Fatalf("RunQuery errors: %s\n", err)
+		}
 
 		// Read expected output from golden file
 		expected, err := ioutil.ReadFile(golden)
@@ -134,7 +140,10 @@ func TestPtr(t *testing.T) {
 	for _, hostname := range tests {
 		golden := "testdata/" + hostname + "_ptr.golden"
 		query.Hostname = hostname
-		actual := dany.RunQuery(query)
+		actual, errors := dany.RunQuery(query)
+		if errors != "" {
+			t.Fatalf("RunQuery errors: %s\n", err)
+		}
 
 		// Read expected output from golden file
 		expected, err := ioutil.ReadFile(golden)
