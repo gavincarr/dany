@@ -25,7 +25,7 @@ func TestDefaults(t *testing.T) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	query.Server = net.JoinHostPort(query.Resolvers.Choose().String(), dnsPort)
+	query.Server = net.JoinHostPort(query.Resolvers.Next().String(), dnsPort)
 
 	for _, hostname := range hostnames {
 		golden := "testdata/" + hostname + ".golden"
@@ -92,7 +92,7 @@ func TestTypesParseArgs(t *testing.T) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		query.Server = net.JoinHostPort(query.Resolvers.Choose().String(), dnsPort)
+		query.Server = net.JoinHostPort(query.Resolvers.Next().String(), dnsPort)
 		query.Hostname = args[0]
 
 		actual, errors := dany.RunQuery(query)
@@ -133,7 +133,7 @@ func TestPtr(t *testing.T) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	query.Server = net.JoinHostPort(query.Resolvers.Choose().String(), dnsPort)
+	query.Server = net.JoinHostPort(query.Resolvers.Next().String(), dnsPort)
 	query.Ptr = true
 	query.Types = []string{"a", "aaaa"}
 

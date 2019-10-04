@@ -85,7 +85,7 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 			err := fmt.Errorf("Error: unable to parse --server ip address %q", opts.Server)
 			return nil, nil, err
 		}
-		q.Resolvers = dany.ResolverIPs{serverIP}
+		q.Resolvers = dany.NewResolvers(serverIP)
 	} else if opts.Resolvers != "" {
 		resolvers, err := dany.LoadResolvers(opts.Resolvers)
 		if err != nil {
@@ -122,7 +122,7 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 		}
 	}
 
-	if len(q.Resolvers) == 0 {
+	if q.Resolvers == nil {
 		config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
 		if err != nil {
 			return nil, nil, err
@@ -133,11 +133,15 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 				err := fmt.Errorf("Error: unable to parse --server ip address %q", opts.Server)
 				return nil, nil, err
 			}
-			q.Resolvers = append(q.Resolvers, serverIP)
+			if q.Resolvers == nil {
+				q.Resolvers = dany.NewResolvers(serverIP)
+			} else {
+				q.Resolvers.Append(serverIP)
+			}
 		}
 	}
 
-	vprintf("resolvers: %v\n", q.Resolvers)
+	vprintf("resolvers: %v\n", q.Resolvers.List)
 	vprintf("types: %v\n", q.Types)
 
 	return q, args, nil
@@ -243,8 +247,8 @@ func main() {
 
 	// Do lookups on remaining args (sequentially across hostnames)
 	for _, h := range args {
-		if q.Server == "" || len(q.Resolvers) > 1 {
-			q.Server = net.JoinHostPort(q.Resolvers.Choose().String(), dnsPort)
+		if q.Server == "" || q.Resolvers.Length() > 1 {
+			q.Server = net.JoinHostPort(q.Resolvers.Next().String(), dnsPort)
 			vprintf("server: %s\n", q.Server)
 		}
 

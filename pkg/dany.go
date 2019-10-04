@@ -6,7 +6,6 @@ package dany
 import (
 	"bufio"
 	"fmt"
-	"math/rand"
 	"net"
 	"os"
 	"sort"
@@ -26,14 +25,22 @@ var SupportedUSDs = []string{
 	"_dmarc", "_domainkey", "_mta-sts",
 }
 
-type ResolverIPs []net.IP
+// List of Resolver ips
+type Resolvers struct {
+	List  []net.IP
+	Index int
+}
 
-func LoadResolvers(filename string) (ResolverIPs, error) {
+func NewResolvers(ip net.IP) *Resolvers {
+	return &Resolvers{List: []net.IP{ip}}
+}
+
+func LoadResolvers(filename string) (*Resolvers, error) {
 	fh, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
-	var resolvers ResolverIPs
+	var resolvers []net.IP
 	scanner := bufio.NewScanner(fh)
 	for scanner.Scan() {
 		ipText := scanner.Text()
@@ -49,16 +56,27 @@ func LoadResolvers(filename string) (ResolverIPs, error) {
 		err := fmt.Errorf("Error: no resolvers found in --resolv file %q", filename)
 		return nil, err
 	}
-	return resolvers, nil
+	return &Resolvers{List: resolvers, Index: 0}, nil
 }
 
-func (resolvers ResolverIPs) Choose() net.IP {
-	if len(resolvers) == 1 {
-		return resolvers[0]
+func (r *Resolvers) Append(ip net.IP) {
+	r.List = append(r.List, ip)
+}
+
+func (r *Resolvers) Length() int {
+	return len(r.List)
+}
+
+func (r *Resolvers) Next() net.IP {
+	if len(r.List) == 1 {
+		return r.List[0]
 	} else {
-		src := rand.NewSource(time.Now().UnixNano())
-		rinst := rand.New(src)
-		return resolvers[rinst.Intn(len(resolvers))]
+		resolverIP := r.List[r.Index]
+		r.Index++
+		if r.Index >= len(r.List) {
+			r.Index = 0
+		}
+		return resolverIP
 	}
 }
 
@@ -66,7 +84,7 @@ func (resolvers ResolverIPs) Choose() net.IP {
 type Query struct {
 	Hostname  string
 	Types     []string
-	Resolvers ResolverIPs
+	Resolvers *Resolvers
 	Server    string
 	NonFatal  bool
 	Ptr       bool
