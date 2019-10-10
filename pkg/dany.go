@@ -31,12 +31,13 @@ var SupportedUSDs = []string{
 
 // List of Resolver ips
 type Resolvers struct {
-	List  []net.IP
-	Index int
+	List   []net.IP
+	Length int
+	Index  int
 }
 
 func NewResolvers(ip net.IP) *Resolvers {
-	return &Resolvers{List: []net.IP{ip}}
+	return &Resolvers{List: []net.IP{ip}, Length: 1}
 }
 
 func LoadResolvers(filename string) (*Resolvers, error) {
@@ -60,25 +61,23 @@ func LoadResolvers(filename string) (*Resolvers, error) {
 		err := fmt.Errorf("Error: no resolvers found in --resolv file %q", filename)
 		return nil, err
 	}
-	return &Resolvers{List: resolvers, Index: 0}, nil
+	return &Resolvers{List: resolvers, Length: len(resolvers)}, nil
 }
 
 func (r *Resolvers) Append(ip net.IP) {
 	r.List = append(r.List, ip)
-}
-
-func (r *Resolvers) Length() int {
-	return len(r.List)
+	r.Length = len(r.List)
 }
 
 func (r *Resolvers) Next() net.IP {
-	if len(r.List) == 1 {
+	if r.Length == 1 {
 		return r.List[0]
 	} else {
 		resolverIP := r.List[r.Index]
-		r.Index++
-		if r.Index >= len(r.List) {
+		if r.Index >= r.Length-1 {
 			r.Index = 0
+		} else {
+			r.Index++
 		}
 		return resolverIP
 	}

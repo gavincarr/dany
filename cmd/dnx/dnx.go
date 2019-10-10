@@ -124,7 +124,7 @@ func main() {
 		log.Fatal(err)
 	}
 	// Setup a semaphore channel for limiting hostname concurrency
-	concurrency := opts.Concurrency * resolvers.Length()
+	concurrency := opts.Concurrency * resolvers.Length
 	sem := make(chan bool, concurrency)
 
 	if opts.Args.Hostname != "" {

@@ -248,7 +248,7 @@ func main() {
 	for _, h := range args {
 		q.Hostname = h
 
-		if q.Server == "" || q.Resolvers.Length() > 1 {
+		if q.Server == "" || q.Resolvers.Length > 1 {
 			q.Server = net.JoinHostPort(q.Resolvers.Next().String(), dnsPort)
 			vprintf("server: %s\n", q.Server)
 		}
