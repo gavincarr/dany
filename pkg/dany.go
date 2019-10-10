@@ -5,6 +5,7 @@ package dany
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -20,6 +21,9 @@ const timeoutSeconds = 10
 var DefaultRRTypes = []string{"A", "AAAA", "MX", "NS", "SOA", "TXT"}
 var SupportedRRTypes = []string{
 	"A", "AAAA", "CAA", "CNAME", "DNSKEY", "MX", "NS", "NSEC", "RRSIG", "SOA", "SRV", "TXT",
+}
+var NXTypes = []string{
+	"MX", "NS", "SOA",
 }
 var SupportedUSDs = []string{
 	"_dmarc", "_domainkey", "_mta-sts",
@@ -99,6 +103,9 @@ type Result struct {
 	Error   error
 }
 
+var ErrNXDomain = errors.New("NXDOMAIN")
+var ErrServFail = errors.New("SERVFAIL")
+
 /*
 func vprintf(format string, args ...interface{}) {
 	if !opts.Verbose {
@@ -113,17 +120,28 @@ func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname
 	resp, _, err := client.Exchange(msg, server)
 	// Return exchange errors
 	if err != nil {
-		err := fmt.Errorf("Error on %s lookup for %q: %s", rrtype, hostname, err)
+		err := fmt.Errorf("Error on %s lookup for %q: %w", rrtype, hostname, err)
 		return nil, err
 	}
 	if resp != nil {
-		// Return dns errors (unless ignoreErrors is true)
+		// Return dns response errors (unless ignoreErrors is true)
 		if resp.Rcode != dns.RcodeSuccess {
 			if ignoreErrors {
 				return nil, nil
 			}
-			err := fmt.Errorf("Error on %s lookup for %q: %s", rrtype, hostname, dns.RcodeToString[resp.Rcode])
-			return nil, err
+			// Treat NXDomain and ServFail errors as wrapped ErrNXDomain and ErrServFail errors
+			if resp.Rcode == dns.RcodeNameError {
+				err1 := ErrNXDomain
+				err2 := fmt.Errorf("Error on %s lookup for %q: %w", rrtype, hostname, err1)
+				return nil, err2
+			} else if resp.Rcode == dns.RcodeServerFailure {
+				err1 := ErrServFail
+				err2 := fmt.Errorf("Error on %s lookup for %q: %w", rrtype, hostname, err1)
+				return nil, err2
+			} else {
+				err := fmt.Errorf("Error on %s lookup for %q: %s", rrtype, hostname, dns.RcodeToString[resp.Rcode])
+				return nil, err
+			}
 		}
 		// Handle CNAMEs
 		ans := resp.Answer
@@ -137,6 +155,17 @@ func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname
 		}
 	}
 	return resp, nil
+}
+
+func nxlookup(errorStream chan<- error, client *dns.Client, server, rrtype, hostname string) {
+	msg := new(dns.Msg)
+	msg.RecursionDesired = true
+	ignoreErrors := false
+
+	msg.SetQuestion(dns.Fqdn(hostname), dns.StringToType[rrtype])
+	_, err := dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
+
+	errorStream <- err
 }
 
 func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname string, q *Query) {
@@ -255,7 +284,7 @@ func ptrLookupOne(resultStream chan<- Result, client *dns.Client, server, ip, ip
 	msg.SetQuestion(ipArpa, dns.TypePTR)
 
 	resp, _, err := client.Exchange(msg, server)
-	// Die on exchange errors
+	// Return exchange errors
 	if err != nil {
 		err = fmt.Errorf("Error on PTR lookup for %q: %s", ip, err)
 	}
@@ -524,4 +553,43 @@ loop:
 	sort.Strings(resultList)
 
 	return strings.Join(resultList, ""), strings.Join(errors, "")
+}
+
+// Run a set of N dns queries on hostname, returning true if N-1 responses are NXDOMAINs
+func RunNXQuery(hostname string, server string) (bool, error) {
+	// Do lookups, using errorStream to gather results
+	errorStream := make(chan error, len(NXTypes))
+	client := new(dns.Client)
+	// Set client timeouts (dial/read/write) to timeoutSeconds / 2
+	client.Timeout = timeoutSeconds / 2 * time.Second
+	// Run standard lookups
+	count := 0
+	for _, t := range NXTypes {
+		go nxlookup(errorStream, client, server, t, hostname)
+		count++
+	}
+
+	nxcount := 0
+loop:
+	for {
+		select {
+		// Get results from errorStream
+		case err := <-errorStream:
+			if errors.Is(err, ErrNXDomain) {
+				nxcount++
+			}
+			count--
+			if count <= 0 {
+				break loop
+			}
+		// Timeout if some results just take too long
+		case <-time.After(timeoutSeconds * time.Second):
+			break loop
+		}
+	}
+
+	if nxcount >= len(NXTypes)-1 {
+		return true, nil
+	}
+	return false, nil
 }
