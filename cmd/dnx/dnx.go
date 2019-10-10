@@ -20,10 +20,11 @@ const dnsPort = "53"
 
 // Options
 type Options struct {
-	Verbose   bool   `short:"v" long:"verbose" description:"display verbose debug output"`
-	Resolvers string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
-	Server    string `short:"s" long:"server" description:"ip address of server to use as resolver"`
-	Args      struct {
+	Verbose     bool   `short:"v" long:"verbose" description:"display verbose debug output"`
+	Resolvers   string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
+	Server      string `short:"s" long:"server" description:"ip address of server to use as resolver"`
+	Concurrency int    `short:"c" description:"number of hostnames to query concurrently per resolver" default:"3"`
+	Args        struct {
 		Hostname  string   `description:"hostname/domain to lookup"`
 		Hostname2 []string `description:"additional hostnames/domains to lookup"`
 	} `positional-args:"yes"`
@@ -90,11 +91,15 @@ func parseOpts(opts Options) (*dany.Resolvers, error) {
 	return resolvers, nil
 }
 
-func processHostname(hostname string, resolvers *dany.Resolvers) {
+func processHostname(sem chan bool, hostname string, resolvers *dany.Resolvers) {
+	// Release semaphore slot at end of function
+	defer func() { <-sem }()
+
 	server := net.JoinHostPort(resolvers.Next().String(), dnsPort)
 
 	vprintf("looking up %s using %s\n", hostname, server)
 	nxdomain, err := dany.RunNXQuery(hostname, server)
+	vprintf("processing results for %s\n", hostname)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 	}
@@ -118,6 +123,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// Setup a semaphore channel for limiting hostname concurrency
+	concurrency := opts.Concurrency * resolvers.Length()
+	sem := make(chan bool, concurrency)
 
 	if opts.Args.Hostname != "" {
 		// opts.Args version
@@ -128,14 +136,20 @@ func main() {
 
 		// Do lookups
 		for _, hostname := range args {
-			processHostname(hostname, resolvers)
+			sem <- true
+			go processHostname(sem, hostname, resolvers)
 		}
 	} else {
 		// Stdin version
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
 			hostname := scanner.Text()
-			processHostname(hostname, resolvers)
+			sem <- true
+			go processHostname(sem, hostname, resolvers)
 		}
+	}
+	// Wait for remaining goroutines by refilling all sem slots
+	for i := 0; i < cap(sem); i++ {
+		sem <- true
 	}
 }
