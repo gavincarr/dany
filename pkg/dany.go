@@ -82,14 +82,14 @@ func (r *Resolvers) Next() net.IP {
 
 // dany Query - lookup Types for Hostname using Server
 type Query struct {
-	Hostname  string
-	Types     []string
-	Resolvers *Resolvers
-	Server    string
-	NonFatal  bool
-	Ptr       bool
-	Usd       bool
-	Tag       bool
+	Hostname     string
+	Types        []string
+	Resolvers    *Resolvers
+	Server       string
+	IgnoreErrors bool
+	Ptr          bool
+	Usd          bool
+	Tag          bool
 }
 
 // dany query Result
@@ -109,17 +109,17 @@ func vprintf(format string, args ...interface{}) {
 */
 
 // Do an `rrtype` lookup on `hostname`, returning the dns response
-func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname string, nonFatal bool) (*dns.Msg, error) {
+func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname string, ignoreErrors bool) (*dns.Msg, error) {
 	resp, _, err := client.Exchange(msg, server)
-	// Die on exchange errors
+	// Return exchange errors
 	if err != nil {
 		err := fmt.Errorf("Error on %s lookup for %q: %s", rrtype, hostname, err)
 		return nil, err
 	}
 	if resp != nil {
-		// Die on dns errors (unless nonFatal is true)
+		// Return dns errors (unless ignoreErrors is true)
 		if resp.Rcode != dns.RcodeSuccess {
-			if nonFatal {
+			if ignoreErrors {
 				return nil, nil
 			}
 			err := fmt.Errorf("Error on %s lookup for %q: %s", rrtype, hostname, dns.RcodeToString[resp.Rcode])
@@ -129,11 +129,11 @@ func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname
 		ans := resp.Answer
 		if ans != nil && len(ans) > 0 && ans[0].Header().Rrtype == dns.TypeCNAME && rrtype != "CNAME" {
 			// dig reports CNAME targets and then requeries, but that seems too noisy for N rrtypes,
-			// so just silently requery (except with --verbose)
+			// so just silently requery
 			cname := ans[0].(*dns.CNAME)
 			//vprintf("%s %s lookup returned CNAME %q - requerying\n", hostname, rrtype, cname.Target)
 			msg.SetQuestion(dns.Fqdn(cname.Target), msg.Question[0].Qtype)
-			return dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+			return dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		}
 	}
 	return resp, nil
@@ -141,7 +141,7 @@ func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname
 
 func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname string, q *Query) {
 	server := q.Server
-	nonFatal := q.NonFatal
+	ignoreErrors := q.IgnoreErrors
 
 	msg := new(dns.Msg)
 	msg.RecursionDesired = true
@@ -152,7 +152,7 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 	switch rrtype {
 	case "A":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			var ptrMap map[string]string
 			if q.Ptr {
@@ -162,7 +162,7 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 		}
 	case "AAAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeAAAA)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			var ptrMap map[string]string
 			if q.Ptr {
@@ -172,61 +172,61 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 		}
 	case "CAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCAA)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			resultList = formatCAA(rrtype, resp)
 		}
 	case "CNAME":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCNAME)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			resultList = formatCNAME(rrtype, resp)
 		}
 	case "DNSKEY":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeDNSKEY)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			resultList = formatDNSKEY(rrtype, resp)
 		}
 	case "MX":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeMX)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			resultList = formatMX(rrtype, resp)
 		}
 	case "NS":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNS)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			resultList = formatNS(rrtype, resp)
 		}
 	case "NSEC":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNSEC)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			resultList = formatNSEC(rrtype, resp)
 		}
 	case "RRSIG":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeRRSIG)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			resultList = formatRRSIG(rrtype, resp)
 		}
 	case "SOA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSOA)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			resultList = formatSOA(rrtype, resp)
 		}
 	case "SRV":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSRV)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			resultList = formatSRV(rrtype, resp)
 		}
 	case "TXT":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeTXT)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, nonFatal)
+		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 		if err == nil {
 			resultList = formatTXT(rrtype, resp)
 		}
@@ -487,7 +487,7 @@ func RunQuery(q *Query) (string, string) {
 	}
 	// Add USD TXT lookups
 	if q.Usd {
-		q.NonFatal = true
+		q.IgnoreErrors = true
 		domain := h
 		for _, usd := range SupportedUSDs {
 			h = usd + "." + domain

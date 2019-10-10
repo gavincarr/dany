@@ -73,7 +73,6 @@ func checkValidTypes(types []string, typeMap map[string]bool) error {
 // Parse options and arguments and return a dany.Query object and a list of (real) arguments
 func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []string, error) {
 	q := new(dany.Query)
-	q.NonFatal = false
 	q.Ptr = opts.Ptr
 	q.Usd = opts.Usd
 	q.Tag = opts.Tag
@@ -247,13 +246,12 @@ func main() {
 
 	// Do lookups on remaining args (sequentially across hostnames)
 	for _, h := range args {
+		q.Hostname = h
+
 		if q.Server == "" || q.Resolvers.Length() > 1 {
 			q.Server = net.JoinHostPort(q.Resolvers.Next().String(), dnsPort)
 			vprintf("server: %s\n", q.Server)
 		}
-
-		q.Hostname = h
-		vprintf("hostname: %s\n", q.Hostname)
 
 		results, errors := dany.RunQuery(q)
 		if results != "" {
