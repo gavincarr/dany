@@ -24,6 +24,7 @@ type Options struct {
 	Resolvers   string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
 	Server      string `short:"s" long:"server" description:"ip address of server to use as resolver"`
 	Concurrency int    `short:"c" description:"number of hostnames to query concurrently per resolver" default:"3"`
+	Invert      bool   `short:"V" long:"invert" description:"report domains that do NOT return NXDOMAIN"`
 	Args        struct {
 		Hostname  string   `description:"hostname/domain to lookup"`
 		Hostname2 []string `description:"additional hostnames/domains to lookup"`
@@ -102,6 +103,9 @@ func processHostname(sem chan bool, hostname string, resolvers *dany.Resolvers) 
 	vprintf("processing results for %s\n", hostname)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
+	}
+	if opts.Invert {
+		nxdomain = !nxdomain
 	}
 	if nxdomain {
 		fmt.Fprintln(os.Stdout, hostname)
