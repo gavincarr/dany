@@ -255,7 +255,7 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 	case "TXT":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeTXT)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			resultList = formatTXT(rrtype, resp)
 		}
 	default:
