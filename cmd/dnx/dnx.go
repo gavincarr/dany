@@ -6,12 +6,12 @@ package main
 
 import (
 	"bufio"
-	dany "dany/pkg"
 	"fmt"
 	"log"
 	"net"
 	"os"
 
+	dany "github.com/gavincarr/dany/pkg"
 	flags "github.com/jessevdk/go-flags"
 	"github.com/miekg/dns"
 )
