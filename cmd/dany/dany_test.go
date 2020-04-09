@@ -1,7 +1,6 @@
 package main
 
 import (
-	dany "dany/pkg"
 	"flag"
 	"io/ioutil"
 	"log"
@@ -10,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	dany "github.com/gavincarr/dany/pkg"
 )
 
 var update = flag.Bool("update", false, "update .golden files")
