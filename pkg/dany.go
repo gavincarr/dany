@@ -181,7 +181,7 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 	case "A":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			var ptrMap map[string]string
 			if q.Ptr {
 				ptrMap = ptrLookupAll(client, server, rrtype, resp)
@@ -191,7 +191,7 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 	case "AAAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeAAAA)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			var ptrMap map[string]string
 			if q.Ptr {
 				ptrMap = ptrLookupAll(client, server, rrtype, resp)
@@ -201,55 +201,55 @@ func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname str
 	case "CAA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCAA)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			resultList = formatCAA(rrtype, resp)
 		}
 	case "CNAME":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCNAME)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			resultList = formatCNAME(rrtype, resp)
 		}
 	case "DNSKEY":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeDNSKEY)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			resultList = formatDNSKEY(rrtype, resp)
 		}
 	case "MX":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeMX)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			resultList = formatMX(rrtype, resp)
 		}
 	case "NS":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNS)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			resultList = formatNS(rrtype, resp)
 		}
 	case "NSEC":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNSEC)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			resultList = formatNSEC(rrtype, resp)
 		}
 	case "RRSIG":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeRRSIG)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			resultList = formatRRSIG(rrtype, resp)
 		}
 	case "SOA":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSOA)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			resultList = formatSOA(rrtype, resp)
 		}
 	case "SRV":
 		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSRV)
 		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil {
+		if err == nil && resp != nil {
 			resultList = formatSRV(rrtype, resp)
 		}
 	case "TXT":
@@ -293,7 +293,7 @@ func ptrLookupOne(resultStream chan<- Result, client *dns.Client, server, ip, ip
 	}
 
 	var resultText string
-	if resp != nil {
+	if resp != nil && resp != nil {
 		resultText = formatPTRAppend(resp)
 	}
 	res := Result{Label: ip, Results: resultText, Error: err}
