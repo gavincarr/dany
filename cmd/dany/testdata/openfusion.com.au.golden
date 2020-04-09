@@ -4,4 +4,4 @@ NS		a.ns.openfusion.net.
 NS		b.ns.openfusion.net.
 SOA		a.ns.openfusion.net. hostmaster.openfusion.com.au.
 TXT		keybase-site-verification=-yWLzlZIQt0nCQkBU6N-Wtap2CdUs6g1AdbxyD8HUu0
-TXT		v=spf1 mx include:spf.iinet.net.au -all
+TXT		v=spf1 mx -all
