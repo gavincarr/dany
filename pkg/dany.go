@@ -293,7 +293,7 @@ func ptrLookupOne(resultStream chan<- Result, client *dns.Client, server, ip, ip
 	}
 
 	var resultText string
-	if resp != nil && resp != nil {
+	if resp != nil {
 		resultText = formatPTRAppend(resp)
 	}
 	res := Result{Label: ip, Results: resultText, Error: err}
