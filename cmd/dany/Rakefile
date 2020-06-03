@@ -1,0 +1,7 @@
+
+task :default => :build
+
+task :build do
+  sh "go build -tags netgo dany.go"
+  sh "GOOS=darwin GOARCH=amd64 go build -tags netgo -o dany_osx dany.go"
+end
