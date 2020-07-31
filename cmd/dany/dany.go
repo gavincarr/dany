@@ -22,6 +22,7 @@ const dnsPort = "53"
 type Options struct {
 	Verbose   bool   `short:"v" long:"verbose" description:"display verbose debug output"`
 	Types     string `short:"t" long:"types" description:"comma-separated list of DNS resource types to lookup (case-insensitive)"`
+	Udp       bool   `          long:"udp" description:"make UDP dns queries instead of defaulting to TCP"`
 	All       bool   `short:"a" long:"all" description:"display all supported DNS records (rather than default set below)"`
 	Ptr       bool   `short:"p" long:"ptr" description:"lookup and append ptr records to ip results"`
 	Usd       bool   `short:"u" long:"usd" description:"also lookup TXT records of well-known underscore-subdomains of domain (see below)"`
@@ -73,6 +74,7 @@ func checkValidTypes(types []string, typeMap map[string]bool) error {
 // Parse options and arguments and return a dany.Query object and a list of (real) arguments
 func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []string, error) {
 	q := new(dany.Query)
+	q.Udp = opts.Udp
 	q.Ptr = opts.Ptr
 	q.Usd = opts.Usd
 	q.Tag = opts.Tag

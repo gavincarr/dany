@@ -90,6 +90,7 @@ type Query struct {
 	Resolvers    *Resolvers
 	Server       string
 	IgnoreErrors bool
+	Udp          bool
 	Ptr          bool
 	Usd          bool
 	Tag          bool
@@ -502,8 +503,10 @@ func RunQuery(q *Query) (string, string) {
 	// Do lookups, using resultStream to gather results
 	resultStream := make(chan Result, len(q.Types))
 	client := new(dns.Client)
-	// We're often going to want long records like TXT or DNSKEY, so let's just always use tcp
-	client.Net = "tcp"
+	// We're often going to want long records like TXT or DNSKEY, so let's default to use tcp
+	if !q.Udp {
+		client.Net = "tcp"
+	}
 	// Set client timeouts (dial/read/write) to timeoutSeconds / 2
 	client.Timeout = timeoutSeconds / 2 * time.Second
 	// Run standard lookups
