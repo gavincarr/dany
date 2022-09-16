@@ -1,6 +1,7 @@
-// dnx is a commandline DNS client for processing multiple hostnames (as arguments or on
-// stdin) and reporting those that return NXDOMAIN on dns lookups. For safety, dnx does
-// multiple typed lookups concurrently and only reports those that fail all tests.
+// dnx is a commandline DNS client for processing multiple hostnames
+// (as arguments or on stdin) and reporting those that return NXDOMAIN
+// on dns lookups. For safety, dnx does multiple typed lookups
+// concurrently and only reports those that fail all tests.
 
 package main
 
@@ -23,7 +24,8 @@ type Options struct {
 	Verbose     bool   `short:"v" long:"verbose" description:"display verbose debug output"`
 	Resolvers   string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
 	Server      string `short:"s" long:"server" description:"ip address of server to use as resolver"`
-	Concurrency int    `short:"c" description:"number of hostnames to query concurrently per resolver" default:"3"`
+	Concurrency int    `short:"C" long:"concurrency" description:"number of hostnames to query concurrently per resolver" default:"3"`
+	Count       bool   `short:"c" long:"count" description:"report all domains and a count of non-NXDOMAIN responses, comma-separated"`
 	Invert      bool   `short:"V" long:"invert" description:"report domains that do NOT return NXDOMAIN"`
 	Args        struct {
 		Hostname  string   `description:"hostname/domain to lookup"`
@@ -99,16 +101,17 @@ func processHostname(sem chan bool, hostname string, resolvers *dany.Resolvers) 
 	server := net.JoinHostPort(resolvers.Next().String(), dnsPort)
 
 	vprintf("looking up %s using %s\n", hostname, server)
-	nxdomain, err := dany.RunNXQuery(hostname, server)
-	vprintf("processing results for %s\n", hostname)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
+	responseCount := dany.RunNXQuery(hostname, server)
+	if opts.Count {
+		fmt.Printf("%s,%d\n", hostname, responseCount)
+		return
 	}
+	nxdomain := responseCount == 0
 	if opts.Invert {
 		nxdomain = !nxdomain
 	}
 	if nxdomain {
-		fmt.Fprintln(os.Stdout, hostname)
+		fmt.Println(hostname)
 	}
 }
 

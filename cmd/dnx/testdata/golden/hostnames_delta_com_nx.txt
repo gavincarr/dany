@@ -1,0 +1,14 @@
+appnet.delta.com
+appstore-si.delta.com
+appstore-uat.delta.com
+appstore.delta.com
+atl-smtp-out.delta.com
+author.delta.com
+avedge.cfitrl.delta.com
+avedge.delta.com
+b.e.delta.com
+c.mx.e.delta.com
+del.delta.com
+dev-voice.delta.com
+dev.delta.com
+dev.tellme.delta.com

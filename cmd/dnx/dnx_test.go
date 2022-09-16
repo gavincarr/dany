@@ -14,7 +14,7 @@ import (
 
 var update = flag.Bool("update", false, "update .golden files")
 
-func TestDefaults(t *testing.T) {
+func TestDNXDefaults(t *testing.T) {
 	testdata := "testdata/hostnames_delta_com.txt"
 	data, err := ioutil.ReadFile(testdata)
 	if err != nil {
@@ -22,7 +22,7 @@ func TestDefaults(t *testing.T) {
 	}
 	hostnames := strings.Split(string(data), "\n")
 
-	golden := "testdata/hostnames_delta_com_nx.txt"
+	golden := "testdata/golden/hostnames_delta_com_nx.txt"
 	hostnames_nx, err := ioutil.ReadFile(golden)
 	if err != nil {
 		log.Fatal(err)
@@ -41,11 +41,8 @@ func TestDefaults(t *testing.T) {
 		go func(h string) {
 			defer func() { <-sem }()
 			server := net.JoinHostPort(resolvers.Next().String(), dnsPort)
-			nxdomain, err := dany.RunNXQuery(h, server)
-			if err != nil {
-				log.Fatal(err)
-			}
-			if nxdomain {
+			responseCount := dany.RunNXQuery(h, server)
+			if responseCount == 0 {
 				ch <- h
 			} else {
 				ch <- ""

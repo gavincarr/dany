@@ -1,5 +1,6 @@
-// dany is a commandline DNS client that simulates (unreliable/semi-deprecated) dns `ANY`
-// queries by doing individual typed DNS queries concurrently and aggregating the results
+// dany is a commandline DNS client that simulates (unreliable/semi-deprecated)
+// dns `ANY` queries by doing individual typed DNS queries concurrently and
+// aggregating the results
 
 package dany
 
@@ -557,8 +558,9 @@ loop:
 	return strings.Join(resultList, ""), strings.Join(errors, "")
 }
 
-// Run a set of N dns queries on hostname, returning true if N-1 responses are NXDOMAINs
-func RunNXQuery(hostname string, server string) (bool, error) {
+// Run a set of NXTypes dns queries on hostname, returning the number of
+// non-NXDOMAIN responses i.e. should return 0 for NX domains
+func RunNXQuery(hostname string, server string) int {
 	// Do lookups, using errorStream to gather results
 	errorStream := make(chan error, len(NXTypes))
 	client := new(dns.Client)
@@ -590,8 +592,5 @@ loop:
 		}
 	}
 
-	if nxcount >= len(NXTypes)-1 {
-		return true, nil
-	}
-	return false, nil
+	return len(NXTypes) - nxcount
 }

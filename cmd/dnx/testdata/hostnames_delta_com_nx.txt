@@ -1,7 +1,0 @@
-appnet.delta.com
-atl-smtp-out.delta.com
-author.delta.com
-del.delta.com
-dev-voice.delta.com
-dev.delta.com
-dev.tellme.delta.com
