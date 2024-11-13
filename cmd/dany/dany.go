@@ -16,7 +16,11 @@ import (
 	"github.com/miekg/dns"
 )
 
-const dnsPort = "53"
+const (
+	dnsPort = "53"
+	fallbackServer = "8.8.8.8"
+	resolvConfPath = "/etc/resolv.conf"
+)
 
 // Options
 type Options struct {
@@ -123,8 +127,20 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 		}
 	}
 
-	if q.Resolvers == nil {
-		config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
+	//
+	// /etc/resolv.conf won't exist on Windows.  In that case, fall back to
+	// some well-known server, like Google's 8.8.8.8 or CloudFlare's 1.1.1.1.
+	//
+	// In theory, we can figure out what the default DNS server for the
+	// current machine is by using e.g.
+	//
+	// https://github.com/qdm12/dns/blob/v2.0.0-beta/pkg/nameserver/getlocal_windows.go
+	//
+	// but it's really not worth the trouble, because it pulls in a ton of
+	// other dependencies we don't really need.
+	//
+	if q.Resolvers == nil && readable(resolvConfPath) {
+		config, err := dns.ClientConfigFromFile(resolvConfPath)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -140,12 +156,25 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 				q.Resolvers.Append(serverIP)
 			}
 		}
+	} else if q.Resolvers == nil {
+		q.Resolvers = dany.NewResolvers(net.ParseIP(fallbackServer))
 	}
 
 	vprintf("resolvers: %v\n", q.Resolvers.List)
 	vprintf("types: %v\n", q.Types)
 
 	return q, args, nil
+}
+
+//
+// Readable returns true if the specified path is readable (file exists, permissions are OK, etc)
+//
+func readable(path string) bool {
+	_, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return true
 }
 
 // Types and Server args are deprecated, but for now we have to keep checking for them
