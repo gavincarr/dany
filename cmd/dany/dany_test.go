@@ -33,7 +33,7 @@ func TestDefaults(t *testing.T) {
 		query.Hostname = hostname
 		actual, errors := dany.RunQuery(query)
 		if errors != "" {
-			t.Fatalf("RunQuery errors: %s\n", err)
+			t.Fatalf("RunQuery errors for %q: %s", hostname, errors)
 		}
 
 		// Read expected output from golden file
@@ -93,12 +93,14 @@ func TestTypesParseArgs(t *testing.T) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		query.Server = net.JoinHostPort(query.Resolvers.Next().String(), dnsPort)
+		if query.Server == "" {
+			query.Server = net.JoinHostPort(query.Resolvers.Next().String(), dnsPort)
+		}
 		query.Hostname = args[0]
 
 		actual, errors := dany.RunQuery(query)
 		if errors != "" {
-			t.Fatalf("RunQuery errors: %s\n", err)
+			t.Fatalf("RunQuery errors for %q %v: %s", test.hostname, test.types, errors)
 		}
 
 		// Read expected output from golden file
@@ -143,7 +145,7 @@ func TestPtr(t *testing.T) {
 		query.Hostname = hostname
 		actual, errors := dany.RunQuery(query)
 		if errors != "" {
-			t.Fatalf("RunQuery errors: %s\n", err)
+			t.Fatalf("RunQuery errors for %q: %s", hostname, errors)
 		}
 
 		// Read expected output from golden file
