@@ -12,7 +12,7 @@ import (
 	"net"
 	"os"
 
-	dany "github.com/gavincarr/dany/pkg"
+	"github.com/gavincarr/dany"
 	flags "github.com/jessevdk/go-flags"
 	"github.com/miekg/dns"
 )

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Two CLI binaries share one library:
 
-- `pkg/dany.go` — package `dany`, the shared DNS query engine. Exposes `RunQuery` (typed-ANY aggregation) and `RunNXQuery` (NXDOMAIN probing), plus the `Query`, `Resolvers`, `Result` types and the `DefaultRRTypes` / `SupportedRRTypes` / `NXTypes` / `SupportedUSDs` constants.
+- `dany.go` (repo root) — package `dany`, the shared DNS query engine. Exposes `RunQuery` (typed-ANY aggregation) and `RunNXQuery` (NXDOMAIN probing), plus the `Query`, `Resolvers`, `Result` types and the `DefaultRRTypes` / `SupportedRRTypes` / `NXTypes` / `SupportedUSDs` constants. Imported by the CLIs as `github.com/gavincarr/dany`.
 - `cmd/dany/dany.go` — the `dany` CLI: simulates DNS `ANY` queries by firing the configured RR types (default `SOA,NS,A,AAAA,MX,TXT`) concurrently and aggregating tab-separated results.
 - `cmd/dnx/dnx.go` — the `dnx` CLI: takes hostnames (args or stdin) and reports those that return NXDOMAIN. For safety it runs all `NXTypes` (`MX,NS,SOA`) concurrently per hostname and only reports a host as NX if *every* type returns NXDOMAIN (`RunNXQuery` returns `len(NXTypes) - nxcount`).
 
@@ -40,11 +40,11 @@ Both `cmd/dany/dany_test.go` and `cmd/dnx/dnx_test.go` are **integration tests a
 
 `TestTypesParseArgs` randomises argv ordering each run to exercise the positional-arg parser — flakiness in arg-order handling will show up here.
 
-## Architecture notes worth knowing before editing `pkg/dany.go`
+## Architecture notes worth knowing before editing `dany.go`
 
 - **TCP by default.** `RunQuery` sets `client.Net = "tcp"` unless `Query.Udp` is true, because TXT/DNSKEY responses are often too big for UDP. Don't flip this default casually.
 - **Concurrency model.** `RunQuery` fans out one goroutine per RR type into a buffered `resultStream`; the main loop drains exactly `count` results or bails at a 10s wall-clock timeout (`timeoutSeconds`). Per-client dial/read/write timeout is `timeoutSeconds/2`. Same shape in `RunNXQuery` over `NXTypes`.
-- **Adding a new RR type** requires three coordinated edits in `pkg/dany.go`: add to `SupportedRRTypes`, add a `case "X":` in `lookup()`, and add a `formatX()` helper. Then add a golden-file test case.
+- **Adding a new RR type** requires three coordinated edits in `dany.go`: add to `SupportedRRTypes`, add a `case "X":` in `lookup()`, and add a `formatX()` helper. Then add a golden-file test case.
 - **CNAME handling** is implicit: `dnsLookup` transparently re-queries the CNAME target for any non-CNAME request type, so `formatX` helpers never see CNAME answers.
 - **PTR enrichment** (`-p/--ptr`) runs *after* A/AAAA results return, via `ptrLookupAll` → goroutine-per-IP `ptrLookupOne`, and is appended to A/AAAA lines (not emitted as separate PTR records).
 - **Resolvers** rotate round-robin via `Resolvers.Next()`. With multiple resolvers, `dany` re-picks per hostname; `dnx` re-picks per goroutine. `dnx`'s overall concurrency cap is `opts.Concurrency * resolvers.Length`.
