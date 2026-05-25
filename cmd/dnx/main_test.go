@@ -1,9 +1,28 @@
 package main
 
 import (
+	"bytes"
+	"net"
 	"strings"
 	"testing"
+
+	"github.com/gavincarr/dany/internal/testdns"
 )
+
+// withTestDNS spins up an in-process DNS server and points the package's
+// dnsPort at its randomly-assigned port for the duration of the test.
+func withTestDNS(t *testing.T) *testdns.Server {
+	t.Helper()
+	srv := testdns.New(t)
+	_, port, err := net.SplitHostPort(srv.Addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q): %v", srv.Addr, err)
+	}
+	orig := dnsPort
+	dnsPort = port
+	t.Cleanup(func() { dnsPort = orig })
+	return srv
+}
 
 func TestParseOptsTypes(t *testing.T) {
 	tests := []struct {
@@ -56,5 +75,60 @@ func TestParseOptsBadServer(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unable to parse") {
 		t.Errorf("error = %q, want substring 'unable to parse'", err)
+	}
+}
+
+func TestRunCLI_NXDomain(t *testing.T) {
+	srv := withTestDNS(t)
+	// present.example.com has an SOA → not NX. missing.example.com has
+	// nothing registered → all NX-probe types (MX/NS/SOA) return NXDOMAIN.
+	srv.Add(testdns.MustRR("present.example.com. 300 IN SOA ns.example.com. hostmaster.example.com. 1 7200 3600 1209600 3600"))
+
+	opts := Options{
+		Server:      "127.0.0.1",
+		Concurrency: 1,
+	}
+	opts.Args.Hostname = "present.example.com"
+	opts.Args.Hostname2 = []string{"missing.example.com"}
+
+	var buf bytes.Buffer
+	if err := runCLI(opts, &buf); err != nil {
+		t.Fatalf("runCLI: %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "missing.example.com\n") {
+		t.Errorf("missing.example.com not reported as NX:\n%s", got)
+	}
+	if strings.Contains(got, "present.example.com") {
+		t.Errorf("present.example.com should be suppressed (has SOA):\n%s", got)
+	}
+}
+
+func TestRunCLI_Count(t *testing.T) {
+	srv := withTestDNS(t)
+	// present.example.com exists at all (one SOA), so every NX-probe type
+	// returns either an answer or NoData — none return NXDOMAIN — so the
+	// count is len(NXTypes) = 3. missing.example.com → 0.
+	srv.Add(testdns.MustRR("present.example.com. 300 IN SOA ns.example.com. hostmaster.example.com. 1 7200 3600 1209600 3600"))
+
+	opts := Options{
+		Server:      "127.0.0.1",
+		Concurrency: 1,
+		Count:       true,
+	}
+	opts.Args.Hostname = "present.example.com"
+	opts.Args.Hostname2 = []string{"missing.example.com"}
+
+	var buf bytes.Buffer
+	if err := runCLI(opts, &buf); err != nil {
+		t.Fatalf("runCLI: %v", err)
+	}
+
+	got := buf.String()
+	for _, want := range []string{"present.example.com,3\n", "missing.example.com,0\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q\n--- got ---\n%s", want, got)
+		}
 	}
 }

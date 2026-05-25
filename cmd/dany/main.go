@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -18,11 +19,14 @@ import (
 )
 
 const (
-	dnsPort        = "53"
 	fallbackServer = "8.8.8.8"
 	resolvConfPath = "/etc/resolv.conf"
 	name           = "dany"
 )
+
+// dnsPort is the port appended to resolver IPs. Declared as a var (not
+// const) so end-to-end tests can point runCLI at testdns's random port.
+var dnsPort = "53"
 
 // Options
 type Options struct {
@@ -35,6 +39,7 @@ type Options struct {
 	Www       bool   `short:"w" long:"www" description:"also lookup A/AAAA records for www.<hostname>"`
 	Tag       bool   `short:"T" long:"tag" description:"tag output lines with hostname (default to true if multiple hostnames)"`
 	Fmt       string `short:"f" long:"fmt" choice:"text" choice:"json" choice:"yaml" choice:"yml" default:"text" description:"output format"`
+	Output    string `short:"o" long:"output" description:"write output to <path> instead of stdout (truncates; appends across multiple hostnames within one invocation)"`
 	Version   bool   `          long:"version" description:"print version and exit"`
 	Resolvers string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
 	Server    string `short:"s" long:"server" description:"ip address of server to use as resolver"`
@@ -44,12 +49,11 @@ type Options struct {
 	} `positional-args:"yes"`
 }
 
-var opts Options
+// verbose is set by runCLI from opts.Verbose so vprintf doesn't have to be
+// threaded through every helper that wants debug output.
+var verbose bool
 
-// Disable flags.PrintErrors for more control
-var parser = flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
-
-func usage() {
+func usage(parser *flags.Parser) {
 	parser.WriteHelp(os.Stderr)
 	fmt.Fprintf(os.Stderr, "\nDefault DNS resource types: %s\n", strings.Join(dany.DefaultRRTypes, ","))
 	fmt.Fprintf(os.Stderr, "Supported DNS resource types: %s\n", strings.Join(dany.SupportedRRTypes, ","))
@@ -58,7 +62,7 @@ func usage() {
 }
 
 func vprintf(format string, args ...interface{}) {
-	if !opts.Verbose {
+	if !verbose {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "+ "+format, args...)
@@ -259,44 +263,56 @@ func parseArgs(q *dany.Query, args []string, typeMap map[string]bool, testMode b
 	return newargs, nil
 }
 
-func main() {
-	// Parse options
-	if _, err := parser.Parse(); err != nil {
-		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type != flags.ErrHelp {
-			fmt.Fprintf(os.Stderr, "%s\n\n", err)
-		}
-		usage()
-	}
+// nopCloser lets openOutput return a uniform io.Closer for the stdout
+// path so callers can always `defer closer.Close()` without nil-checking.
+type nopCloser struct{}
 
-	// --version is a short-circuit: print and exit before any further
-	// validation (so e.g. `dany --version` works without a hostname).
-	if opts.Version {
-		fmt.Printf("%s %s\n", name, version.Version)
-		return
-	}
+func (nopCloser) Close() error { return nil }
 
-	// Setup
+// openOutput resolves the -o/--output target. Empty path → defaultOut with
+// a no-op closer; non-empty → os.Create (truncating) returning the file as
+// both writer and closer. Threading defaultOut (rather than hard-coding
+// os.Stdout) lets runCLI's caller hand in a *bytes.Buffer for tests.
+func openOutput(path string, defaultOut io.Writer) (io.Writer, io.Closer, error) {
+	if path == "" {
+		return defaultOut, nopCloser{}, nil
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return f, f, nil
+}
+
+// runCLI is the testable entry point: turns Options into a dany.Query, runs
+// the lookups, and writes rendered output to out. -o/--output overrides
+// out; per-error stderr writes (text mode) still go to os.Stderr.
+func runCLI(opts Options, out io.Writer) error {
+	verbose = opts.Verbose
 	log.SetFlags(0)
-	if opts.Args.Hostname == "" {
-		usage()
-	}
 
-	// Parse options into dany.Query (including deprecated option elts in args)
 	args := []string{opts.Args.Hostname}
 	if len(opts.Args.Hostname2) > 0 {
 		args = append(args, opts.Args.Hostname2...)
 	}
 	q, args, err := parseOpts(opts, args, false)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
-	// Set q.Tag to true if multiple hostnames
 	if len(args) > 1 {
 		q.Tag = true
 	}
 
-	// Do lookups on remaining args (sequentially across hostnames)
+	// -o/--output truncates on open and is reused across hostnames so
+	// multi-host runs land in one file (NDJSON-style for -f json, multi-doc
+	// YAML for -f yaml, just concatenated for text).
+	out, closer, err := openOutput(opts.Output, out)
+	if err != nil {
+		return err
+	}
+	defer closer.Close()
+
 	for _, h := range args {
 		q.Hostname = h
 
@@ -309,16 +325,45 @@ func main() {
 		switch opts.Fmt {
 		case "json":
 			// Errors fold into the JSON envelope; nothing goes to stderr.
-			fmt.Fprint(os.Stdout, dany.RenderJSON(answers, q, errs))
+			fmt.Fprint(out, dany.RenderJSON(answers, q, errs))
 		case "yaml", "yml":
-			fmt.Fprint(os.Stdout, dany.RenderYAML(answers, q, errs))
+			fmt.Fprint(out, dany.RenderYAML(answers, q, errs))
 		default:
 			if rendered := dany.Render(answers, q.Tag); rendered != "" {
-				fmt.Fprint(os.Stdout, rendered)
+				fmt.Fprint(out, rendered)
 			}
 			for _, e := range errs {
 				fmt.Fprintln(os.Stderr, e)
 			}
 		}
+	}
+	return nil
+}
+
+func main() {
+	var opts Options
+	// Disable flags.PrintErrors for more control
+	parser := flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
+
+	if _, err := parser.Parse(); err != nil {
+		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type != flags.ErrHelp {
+			fmt.Fprintf(os.Stderr, "%s\n\n", err)
+		}
+		usage(parser)
+	}
+
+	// --version is a short-circuit: print and exit before any further
+	// validation (so e.g. `dany --version` works without a hostname).
+	if opts.Version {
+		fmt.Printf("%s %s\n", name, version.Version)
+		return
+	}
+
+	if opts.Args.Hostname == "" {
+		usage(parser)
+	}
+
+	if err := runCLI(opts, os.Stdout); err != nil {
+		log.Fatal(err)
 	}
 }

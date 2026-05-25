@@ -1,11 +1,88 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gavincarr/dany"
+	"github.com/gavincarr/dany/internal/testdns"
 )
+
+// withTestDNS spins up an in-process DNS server and points the package's
+// dnsPort at its randomly-assigned port for the duration of the test, so
+// runCLI's resolver IP → host:port construction lands on testdns.
+func withTestDNS(t *testing.T) *testdns.Server {
+	t.Helper()
+	srv := testdns.New(t)
+	_, port, err := net.SplitHostPort(srv.Addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q): %v", srv.Addr, err)
+	}
+	orig := dnsPort
+	dnsPort = port
+	t.Cleanup(func() { dnsPort = orig })
+	return srv
+}
+
+func TestOpenOutput(t *testing.T) {
+	t.Run("empty path returns defaultOut", func(t *testing.T) {
+		var buf bytes.Buffer
+		w, c, err := openOutput("", &buf)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if w != &buf {
+			t.Errorf("writer = %v, want defaultOut (&buf)", w)
+		}
+		// Closing the nop closer must be safe and must NOT close defaultOut.
+		if err := c.Close(); err != nil {
+			t.Errorf("Close() = %v, want nil", err)
+		}
+	})
+
+	t.Run("valid path opens and truncates (ignores defaultOut)", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "out.txt")
+		// Pre-create with content so we can confirm os.Create truncates.
+		if err := os.WriteFile(path, []byte("stale\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		w, c, err := openOutput(path, &buf)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, err := w.Write([]byte("fresh\n")); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		if err := c.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != "fresh\n" {
+			t.Errorf("file contents = %q, want %q (truncation failed?)", got, "fresh\n")
+		}
+		if buf.Len() != 0 {
+			t.Errorf("defaultOut buffer = %q, want empty when -o is set", buf.String())
+		}
+	})
+
+	t.Run("invalid path returns error", func(t *testing.T) {
+		// Parent dir doesn't exist → os.Create fails.
+		path := filepath.Join(t.TempDir(), "no-such-subdir", "out.txt")
+		_, _, err := openOutput(path, os.Stdout)
+		if err == nil {
+			t.Errorf("expected error for unreachable path %q, got nil", path)
+		}
+	})
+}
 
 // testTypeMap builds the same case-insensitive type map that parseOpts uses.
 func testTypeMap() map[string]bool {
@@ -205,6 +282,97 @@ func TestParseOpts_WwwTypesMirroring(t *testing.T) {
 				t.Errorf("q.WwwTypes = %v, want %v", q.WwwTypes, tc.wantWwwTypes)
 			}
 		})
+	}
+}
+
+func TestRunCLI_Text(t *testing.T) {
+	srv := withTestDNS(t)
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+	srv.Add(testdns.MustRR("example.com. 300 IN MX 10 mx.example.com."))
+
+	opts := Options{
+		Server: "127.0.0.1",
+		Types:  "A,MX",
+		Fmt:    "text",
+	}
+	opts.Args.Hostname = "example.com"
+
+	var buf bytes.Buffer
+	if err := runCLI(opts, &buf); err != nil {
+		t.Fatalf("runCLI: %v", err)
+	}
+
+	want := "A\t\t1.2.3.4\nMX\t10\tmx.example.com.\n"
+	if got := buf.String(); got != want {
+		t.Errorf("output = %q, want %q", got, want)
+	}
+}
+
+func TestRunCLI_JSON(t *testing.T) {
+	srv := withTestDNS(t)
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+
+	opts := Options{
+		Server: "127.0.0.1",
+		Types:  "A",
+		Fmt:    "json",
+	}
+	opts.Args.Hostname = "example.com"
+
+	var buf bytes.Buffer
+	if err := runCLI(opts, &buf); err != nil {
+		t.Fatalf("runCLI: %v", err)
+	}
+
+	// RenderJSON is NDJSON-ready (one doc per line) — for a single hostname,
+	// the buffer holds exactly one JSON object followed by '\n'.
+	var env struct {
+		Query struct {
+			Hostname string `json:"hostname"`
+		} `json:"query"`
+		Answers []struct {
+			Type string `json:"type"`
+		} `json:"answers"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
+	}
+	if env.Query.Hostname != "example.com" {
+		t.Errorf("query.hostname = %q, want example.com", env.Query.Hostname)
+	}
+	if len(env.Answers) != 1 || env.Answers[0].Type != "A" {
+		t.Errorf("answers = %+v, want one A record", env.Answers)
+	}
+}
+
+func TestRunCLI_OutputFileOverridesWriter(t *testing.T) {
+	srv := withTestDNS(t)
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+
+	outPath := filepath.Join(t.TempDir(), "out.txt")
+	opts := Options{
+		Server: "127.0.0.1",
+		Types:  "A",
+		Fmt:    "text",
+		Output: outPath,
+	}
+	opts.Args.Hostname = "example.com"
+
+	var buf bytes.Buffer
+	if err := runCLI(opts, &buf); err != nil {
+		t.Fatalf("runCLI: %v", err)
+	}
+
+	if buf.Len() != 0 {
+		t.Errorf("writer received output despite -o: %q", buf.String())
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "A\t\t1.2.3.4\n"
+	if string(got) != want {
+		t.Errorf("file = %q, want %q", got, want)
 	}
 }
 

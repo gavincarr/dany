@@ -8,10 +8,12 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/gavincarr/dany"
 	"github.com/gavincarr/dany/internal/version"
@@ -19,10 +21,11 @@ import (
 	"github.com/miekg/dns"
 )
 
-const (
-	dnsPort = "53"
-	name    = "dnx"
-)
+const name = "dnx"
+
+// dnsPort is the port appended to resolver IPs. Declared as a var (not
+// const) so end-to-end tests can point runCLI at testdns's random port.
+var dnsPort = "53"
 
 // Options
 type Options struct {
@@ -40,12 +43,11 @@ type Options struct {
 	} `positional-args:"yes"`
 }
 
-var opts Options
+// verbose is set by runCLI from opts.Verbose so vprintf doesn't have to be
+// threaded through every helper that wants debug output.
+var verbose bool
 
-// Disable flags.PrintErrors for more control
-var parser = flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
-
-func usage() {
+func usage(parser *flags.Parser) {
 	parser.WriteHelp(os.Stderr)
 	fmt.Fprintf(os.Stderr, "\nDefault NX-probe types: %s\n", strings.Join(dany.NXTypes, ","))
 	fmt.Fprintf(os.Stderr, "Supported DNS resource types: %s\n", strings.Join(dany.SupportedRRTypes, ","))
@@ -53,7 +55,7 @@ func usage() {
 }
 
 func vprintf(format string, args ...interface{}) {
-	if !opts.Verbose {
+	if !verbose {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "+ "+format, args...)
@@ -127,34 +129,83 @@ func parseOpts(opts Options) (*dany.Resolvers, []string, error) {
 	return resolvers, types, nil
 }
 
-func processHostname(sem chan bool, hostname string, resolvers *dany.Resolvers, types []string) {
-	// Release semaphore slot at end of function
-	defer func() { <-sem }()
+// runCLI is the testable entry point: parses opts, fans out NX probes
+// across goroutines, and writes hostname lines to out. Writes from
+// goroutines are serialized so out can be a *bytes.Buffer in tests.
+func runCLI(opts Options, out io.Writer) error {
+	verbose = opts.Verbose
+	log.SetFlags(0)
 
-	server := net.JoinHostPort(resolvers.Next().String(), dnsPort)
+	resolvers, types, err := parseOpts(opts)
+	if err != nil {
+		return err
+	}
 
-	vprintf("looking up %s using %s\n", hostname, server)
-	responseCount := dany.RunNXQuery(&dany.Query{Hostname: hostname, Server: server, Types: types})
-	if opts.Count {
-		fmt.Printf("%s,%d\n", hostname, responseCount)
-		return
+	// out is shared across goroutines; serialize so a *bytes.Buffer (test)
+	// or a redirected stdout doesn't interleave lines.
+	var mu sync.Mutex
+	emit := func(format string, args ...interface{}) {
+		mu.Lock()
+		defer mu.Unlock()
+		fmt.Fprintf(out, format, args...)
 	}
-	nxdomain := responseCount == 0
-	if opts.Invert {
-		nxdomain = !nxdomain
+
+	concurrency := opts.Concurrency * resolvers.Length
+	sem := make(chan bool, concurrency)
+
+	process := func(hostname string) {
+		defer func() { <-sem }()
+
+		server := net.JoinHostPort(resolvers.Next().String(), dnsPort)
+		vprintf("looking up %s using %s\n", hostname, server)
+		responseCount := dany.RunNXQuery(&dany.Query{Hostname: hostname, Server: server, Types: types})
+		if opts.Count {
+			emit("%s,%d\n", hostname, responseCount)
+			return
+		}
+		nxdomain := responseCount == 0
+		if opts.Invert {
+			nxdomain = !nxdomain
+		}
+		if nxdomain {
+			emit("%s\n", hostname)
+		}
 	}
-	if nxdomain {
-		fmt.Println(hostname)
+
+	if opts.Args.Hostname != "" {
+		args := []string{opts.Args.Hostname}
+		if len(opts.Args.Hostname2) > 0 {
+			args = append(args, opts.Args.Hostname2...)
+		}
+		for _, hostname := range args {
+			sem <- true
+			go process(hostname)
+		}
+	} else {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			hostname := scanner.Text()
+			sem <- true
+			go process(hostname)
+		}
 	}
+	// Wait for remaining goroutines by refilling all sem slots
+	for i := 0; i < cap(sem); i++ {
+		sem <- true
+	}
+	return nil
 }
 
 func main() {
-	// Parse options
+	var opts Options
+	// Disable flags.PrintErrors for more control
+	parser := flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
+
 	if _, err := parser.Parse(); err != nil {
 		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type != flags.ErrHelp {
 			fmt.Fprintf(os.Stderr, "%s\n\n", err)
 		}
-		usage()
+		usage(parser)
 	}
 
 	// --version is a short-circuit: print and exit before any further
@@ -164,39 +215,7 @@ func main() {
 		return
 	}
 
-	// Setup
-	log.SetFlags(0)
-	resolvers, types, err := parseOpts(opts)
-	if err != nil {
+	if err := runCLI(opts, os.Stdout); err != nil {
 		log.Fatal(err)
-	}
-	// Setup a semaphore channel for limiting hostname concurrency
-	concurrency := opts.Concurrency * resolvers.Length
-	sem := make(chan bool, concurrency)
-
-	if opts.Args.Hostname != "" {
-		// opts.Args version
-		args := []string{opts.Args.Hostname}
-		if len(opts.Args.Hostname2) > 0 {
-			args = append(args, opts.Args.Hostname2...)
-		}
-
-		// Do lookups
-		for _, hostname := range args {
-			sem <- true
-			go processHostname(sem, hostname, resolvers, types)
-		}
-	} else {
-		// Stdin version
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			hostname := scanner.Text()
-			sem <- true
-			go processHostname(sem, hostname, resolvers, types)
-		}
-	}
-	// Wait for remaining goroutines by refilling all sem slots
-	for i := 0; i < cap(sem); i++ {
-		sem <- true
 	}
 }
