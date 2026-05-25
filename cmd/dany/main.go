@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 	"github.com/gavincarr/dany"
 	"github.com/gavincarr/dany/internal/version"
 	flags "github.com/jessevdk/go-flags"
+	"github.com/lmittmann/tint"
 	"github.com/miekg/dns"
 )
 
@@ -30,7 +32,7 @@ var dnsPort = "53"
 
 // Options
 type Options struct {
-	Verbose   bool   `short:"v" long:"verbose" description:"display verbose debug output"`
+	Verbose   []bool `short:"v" long:"verbose" description:"verbose output (-v: info, -vv: debug)"`
 	Types     string `short:"t" long:"types" description:"comma-separated list of DNS resource types to lookup (case-insensitive)"`
 	Udp       bool   `          long:"udp" description:"make UDP dns queries instead of defaulting to TCP"`
 	All       bool   `short:"a" long:"all" description:"display all supported DNS records (rather than default set below)"`
@@ -49,10 +51,6 @@ type Options struct {
 	} `positional-args:"yes"`
 }
 
-// verbose is set by runCLI from opts.Verbose so vprintf doesn't have to be
-// threaded through every helper that wants debug output.
-var verbose bool
-
 func usage(parser *flags.Parser) {
 	parser.WriteHelp(os.Stderr)
 	fmt.Fprintf(os.Stderr, "\nDefault DNS resource types: %s\n", strings.Join(dany.DefaultRRTypes, ","))
@@ -61,11 +59,23 @@ func usage(parser *flags.Parser) {
 	os.Exit(2)
 }
 
-func vprintf(format string, args ...interface{}) {
-	if !verbose {
-		return
+// setupLogger installs a tint-colored slog handler on stderr at a level
+// derived from the -v count: bare -v → Info, -vv → Debug, none → Warn
+// (silent for everything dany currently logs). TimeFormat is a single
+// space because dany runs in well under a second; per-line timestamps
+// are noise.
+func setupLogger(verbosity int) {
+	level := slog.LevelWarn
+	switch {
+	case verbosity >= 2:
+		level = slog.LevelDebug
+	case verbosity >= 1:
+		level = slog.LevelInfo
 	}
-	fmt.Fprintf(os.Stderr, "+ "+format, args...)
+	slog.SetDefault(slog.New(tint.NewHandler(os.Stderr, &tint.Options{
+		Level:      level,
+		TimeFormat: " ",
+	})))
 }
 
 // Check all types exist in typeMaps - if not, return an error itemising those that don't
@@ -180,8 +190,8 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 		q.Resolvers = dany.NewResolvers(net.ParseIP(fallbackServer))
 	}
 
-	vprintf("resolvers: %v\n", q.Resolvers.List)
-	vprintf("types: %v\n", q.Types)
+	slog.Info("resolvers configured", "resolvers", q.Resolvers.List)
+	slog.Info("types configured", "types", q.Types)
 
 	return q, args, nil
 }
@@ -288,7 +298,7 @@ func openOutput(path string, defaultOut io.Writer) (io.Writer, io.Closer, error)
 // the lookups, and writes rendered output to out. -o/--output overrides
 // out; per-error stderr writes (text mode) still go to os.Stderr.
 func runCLI(opts Options, out io.Writer) error {
-	verbose = opts.Verbose
+	setupLogger(len(opts.Verbose))
 	log.SetFlags(0)
 
 	args := []string{opts.Args.Hostname}
@@ -318,7 +328,7 @@ func runCLI(opts Options, out io.Writer) error {
 
 		if q.Server == "" || q.Resolvers.Length > 1 {
 			q.Server = net.JoinHostPort(q.Resolvers.Next().String(), dnsPort)
-			vprintf("server: %s\n", q.Server)
+			slog.Info("resolver selected", "server", q.Server)
 		}
 
 		answers, errs := dany.RunQuery(q)

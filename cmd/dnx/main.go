@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/gavincarr/dany"
 	"github.com/gavincarr/dany/internal/version"
 	flags "github.com/jessevdk/go-flags"
+	"github.com/lmittmann/tint"
 	"github.com/miekg/dns"
 )
 
@@ -29,7 +31,7 @@ var dnsPort = "53"
 
 // Options
 type Options struct {
-	Verbose     bool   `short:"v" long:"verbose" description:"display verbose debug output"`
+	Verbose     []bool `short:"v" long:"verbose" description:"verbose output (-v: info, -vv: debug)"`
 	Resolvers   string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
 	Server      string `short:"s" long:"server" description:"ip address of server to use as resolver"`
 	Concurrency int    `short:"C" long:"concurrency" description:"number of hostnames to query concurrently per resolver" default:"3"`
@@ -43,10 +45,6 @@ type Options struct {
 	} `positional-args:"yes"`
 }
 
-// verbose is set by runCLI from opts.Verbose so vprintf doesn't have to be
-// threaded through every helper that wants debug output.
-var verbose bool
-
 func usage(parser *flags.Parser) {
 	parser.WriteHelp(os.Stderr)
 	fmt.Fprintf(os.Stderr, "\nDefault NX-probe types: %s\n", strings.Join(dany.NXTypes, ","))
@@ -54,11 +52,22 @@ func usage(parser *flags.Parser) {
 	os.Exit(2)
 }
 
-func vprintf(format string, args ...interface{}) {
-	if !verbose {
-		return
+// setupLogger installs a tint-colored slog handler on stderr at a level
+// derived from the -v count: bare -v → Info, -vv → Debug, none → Warn
+// (silent for everything dnx currently logs). TimeFormat is a single
+// space because dnx runs short and per-line timestamps are noise.
+func setupLogger(verbosity int) {
+	level := slog.LevelWarn
+	switch {
+	case verbosity >= 2:
+		level = slog.LevelDebug
+	case verbosity >= 1:
+		level = slog.LevelInfo
 	}
-	fmt.Fprintf(os.Stderr, "+ "+format, args...)
+	slog.SetDefault(slog.New(tint.NewHandler(os.Stderr, &tint.Options{
+		Level:      level,
+		TimeFormat: " ",
+	})))
 }
 
 // Parse options and return a set of resolvers and the list of types to probe
@@ -121,9 +130,9 @@ func parseOpts(opts Options) (*dany.Resolvers, []string, error) {
 		}
 	}
 
-	vprintf("resolvers: %v\n", resolvers.List)
+	slog.Info("resolvers configured", "resolvers", resolvers.List)
 	if len(types) > 0 {
-		vprintf("types: %v\n", types)
+		slog.Info("types configured", "types", types)
 	}
 
 	return resolvers, types, nil
@@ -133,7 +142,7 @@ func parseOpts(opts Options) (*dany.Resolvers, []string, error) {
 // across goroutines, and writes hostname lines to out. Writes from
 // goroutines are serialized so out can be a *bytes.Buffer in tests.
 func runCLI(opts Options, out io.Writer) error {
-	verbose = opts.Verbose
+	setupLogger(len(opts.Verbose))
 	log.SetFlags(0)
 
 	resolvers, types, err := parseOpts(opts)
@@ -157,7 +166,7 @@ func runCLI(opts Options, out io.Writer) error {
 		defer func() { <-sem }()
 
 		server := net.JoinHostPort(resolvers.Next().String(), dnsPort)
-		vprintf("looking up %s using %s\n", hostname, server)
+		slog.Debug("looking up hostname", "hostname", hostname, "server", server)
 		responseCount := dany.RunNXQuery(&dany.Query{Hostname: hostname, Server: server, Types: types})
 		if opts.Count {
 			emit("%s,%d\n", hostname, responseCount)
