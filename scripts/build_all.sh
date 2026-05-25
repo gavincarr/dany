@@ -4,7 +4,9 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Silence `cd` (it echoes the target when resolving via CDPATH) so $ROOT
+# stays a single clean path.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 BIN="$ROOT/bin"
 mkdir -p "$BIN"
 
