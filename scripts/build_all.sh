@@ -10,6 +10,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 BIN="$ROOT/bin"
 mkdir -p "$BIN"
 
+# Force pure-Go builds so the resulting binaries are unconditionally static
+# (no libc / NSS resolver linkage), regardless of whether the build host
+# happens to have a C compiler installed. The Debian packaging in debian/
+# relies on this — declared description: "no shared-library dependencies".
+export CGO_ENABLED=0
+
 shopt -s nullglob
 cmds=("$ROOT"/cmd/*/)
 if [[ ${#cmds[@]} -eq 0 ]]; then

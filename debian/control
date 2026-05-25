@@ -1,0 +1,25 @@
+Source: dany
+Section: utils
+Priority: optional
+Maintainer: Gavin Carr <gavin@profound.net>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+
+Package: dany
+Architecture: amd64
+Depends: ${misc:Depends}
+Description: Concurrent typed-ANY DNS lookup utility (+ NXDOMAIN prober)
+ dany simulates the (unreliable / semi-deprecated) DNS ANY query by firing
+ the configured RR types (default SOA,NS,A,AAAA,MX,TXT) concurrently against
+ a single hostname and aggregating the responses. Optional flags add PTR
+ enrichment for A/AAAA results, well-known underscore-subdomain probes
+ (_dmarc, _domainkey, _mta-sts), and a www.<host> probe. Output may be
+ rendered as tab-separated text (default), JSON, or YAML.
+ .
+ dnx, included in the same package, reads hostnames from arguments or stdin
+ and reports the subset that return NXDOMAIN across all of MX, NS, and SOA
+ (a conservative "this name truly doesn't exist" check). Runs lookups
+ concurrently with configurable parallelism.
+ .
+ Distributed as pure-Go statically-linked executables (CGO disabled) with
+ no shared-library or NSS resolver dependencies.

@@ -1,0 +1,9 @@
+dany (0.1.0) unstable; urgency=medium
+
+  * Initial Debian packaging.
+  * Ships two binaries: `dany` (DNS lookup tool that simulates ANY queries
+    by firing typed RR lookups concurrently and aggregating results, with
+    text/JSON/YAML output formats) and `dnx` (concurrent NXDOMAIN bulk
+    prober for hostname lists).
+
+ -- Gavin Carr <gavin@profound.net>  Mon, 25 May 2026 12:41:24 +0800
