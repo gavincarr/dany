@@ -1,7 +1,8 @@
-A		45.79.78.243
-MX	20	b.mx.mailhost.com.au.
-NS		a.ns.openfusion.net.
-NS		b.ns.openfusion.net.
-SOA		a.ns.openfusion.net. hostmaster.openfusion.com.au.
-TXT		keybase-site-verification=-yWLzlZIQt0nCQkBU6N-Wtap2CdUs6g1AdbxyD8HUu0
-TXT		v=spf1 mx -all
+MX	10	mx1.simplelogin.co.
+MX	20	mx2.simplelogin.co.
+NS		a.ns.profound.net.
+NS		b.ns.profound.net.
+NS		c.ns.profound.net.
+SOA		a.ns.profound.net. hostmaster.openfusion.com.au.
+TXT		sl-verification=hpkegrugpyoyhjjlvjxqajbucckbqq
+TXT		v=spf1 include:simplelogin.co ~all
