@@ -214,6 +214,129 @@ func TestRunQuery_CNAMERequery(t *testing.T) {
 	}
 }
 
+func TestRunQuery_Www_UntaggedDedups(t *testing.T) {
+	srv := testdns.New(t)
+	// Apex and www share an IP — the duplicate row should collapse.
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+	srv.Add(testdns.MustRR("www.example.com. 300 IN A 1.2.3.4"))
+
+	q := &Query{
+		Hostname: "example.com",
+		Types:    []string{"A"},
+		Server:   srv.Addr,
+		Www:      true,
+	}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	got := Render(answers, false)
+	want := "A\t\t1.2.3.4\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestRunQuery_Www_UntaggedDistinctIPs(t *testing.T) {
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+	srv.Add(testdns.MustRR("www.example.com. 300 IN A 5.6.7.8"))
+
+	q := &Query{
+		Hostname: "example.com",
+		Types:    []string{"A"},
+		Server:   srv.Addr,
+		Www:      true,
+	}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	got := Render(answers, false)
+	want := "A\t\t1.2.3.4\nA\t\t5.6.7.8\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestRunQuery_Www_Tagged(t *testing.T) {
+	srv := testdns.New(t)
+	// Even when the IPs match, tagged mode must emit one row per hostname.
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+	srv.Add(testdns.MustRR("www.example.com. 300 IN A 1.2.3.4"))
+
+	q := &Query{
+		Hostname: "example.com",
+		Types:    []string{"A"},
+		Server:   srv.Addr,
+		Www:      true,
+	}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	got := Render(answers, true)
+	want := "example.com\tA\t\t1.2.3.4\nwww.example.com\tA\t\t1.2.3.4\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestRunQuery_Www_CustomTypes(t *testing.T) {
+	srv := testdns.New(t)
+	// Apex queried for A; www probe overridden to MX,A via WwwTypes.
+	// Verifies q.WwwTypes wins over the address-only default — AAAA
+	// must NOT be fired against www.
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+	srv.Add(testdns.MustRR("www.example.com. 300 IN A 5.6.7.8"))
+	srv.Add(testdns.MustRR("www.example.com. 300 IN MX 10 mx.example.com."))
+	srv.Add(testdns.MustRR("www.example.com. 300 IN AAAA 2001:db8::1")) // should NOT appear
+
+	q := &Query{
+		Hostname: "example.com",
+		Types:    []string{"A"},
+		WwwTypes: []string{"MX", "A"},
+		Server:   srv.Addr,
+		Www:      true,
+	}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	got := Render(answers, true)
+	want := strings.Join([]string{
+		"example.com\tA\t\t1.2.3.4\n",
+		"www.example.com\tA\t\t5.6.7.8\n",
+		"www.example.com\tMX\t10\tmx.example.com.\n",
+	}, "")
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestRunQuery_Www_MissingIsSilent(t *testing.T) {
+	srv := testdns.New(t)
+	// Apex exists, www does not. The NXDOMAIN on www.* shouldn't surface
+	// as an error and shouldn't add any rows.
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+
+	q := &Query{
+		Hostname: "example.com",
+		Types:    []string{"A"},
+		Server:   srv.Addr,
+		Www:      true,
+	}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	got := Render(answers, false)
+	want := "A\t\t1.2.3.4\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
 func errsContain(errs []error, substr string) bool {
 	for _, e := range errs {
 		if strings.Contains(e.Error(), substr) {
