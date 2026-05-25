@@ -127,6 +127,44 @@ type result struct {
 var ErrNXDomain = errors.New("NXDOMAIN")
 var ErrServFail = errors.New("SERVFAIL")
 
+// QueryError is the structured error type emitted by RunQuery / RunNXQuery
+// goroutines. It carries the RR type and hostname that were being queried
+// plus a stable string Code (DNS rcode names like "NXDOMAIN"/"SERVFAIL",
+// plus "EXCHANGE_ERROR" for transport-level failures and "UNSUPPORTED_TYPE"
+// for unknown RR types) so structured consumers — notably the JSON renderer
+// — can act on errors without parsing the message.
+//
+// Error() preserves the historical `Error on <type> lookup for "<host>": <…>`
+// format so legacy text consumers and existing substring-based tests keep
+// working. Unwrap exposes the underlying error so errors.Is(err, ErrNXDomain)
+// / ErrServFail continue to match.
+type QueryError struct {
+	Type     string
+	Hostname string
+	Code     string
+	Err      error
+}
+
+func (e *QueryError) Error() string {
+	tail := e.Code
+	if e.Err != nil {
+		tail = e.Err.Error()
+	}
+	return fmt.Sprintf("Error on %s lookup for %q: %s", e.Type, e.Hostname, tail)
+}
+
+func (e *QueryError) Unwrap() error { return e.Err }
+
+// rcodeCode maps a DNS response rcode to the stable string code used in
+// QueryError.Code. Falls back to "RCODE_<n>" for rcodes the dns library
+// doesn't have a registered name for.
+func rcodeCode(rcode int) string {
+	if s, ok := dns.RcodeToString[rcode]; ok {
+		return s
+	}
+	return fmt.Sprintf("RCODE_%d", rcode)
+}
+
 /*
 func vprintf(format string, args ...interface{}) {
 	if !opts.Verbose {
@@ -141,8 +179,12 @@ func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname
 	resp, _, err := client.Exchange(msg, server)
 	// Return exchange errors
 	if err != nil {
-		err := fmt.Errorf("Error on %s lookup for %q: %w", rrtype, hostname, err)
-		return nil, err
+		return nil, &QueryError{
+			Type:     rrtype,
+			Hostname: hostname,
+			Code:     "EXCHANGE_ERROR",
+			Err:      err,
+		}
 	}
 	if resp != nil {
 		// Return dns response errors (unless ignoreErrors is true)
@@ -150,19 +192,19 @@ func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname
 			if ignoreErrors {
 				return nil, nil
 			}
-			// Treat NXDomain and ServFail errors as wrapped ErrNXDomain and ErrServFail errors
-			if resp.Rcode == dns.RcodeNameError {
-				err1 := ErrNXDomain
-				err2 := fmt.Errorf("Error on %s lookup for %q: %w", rrtype, hostname, err1)
-				return nil, err2
-			} else if resp.Rcode == dns.RcodeServerFailure {
-				err1 := ErrServFail
-				err2 := fmt.Errorf("Error on %s lookup for %q: %w", rrtype, hostname, err1)
-				return nil, err2
-			} else {
-				err := fmt.Errorf("Error on %s lookup for %q: %s", rrtype, hostname, dns.RcodeToString[resp.Rcode])
-				return nil, err
+			qe := &QueryError{
+				Type:     rrtype,
+				Hostname: hostname,
+				Code:     rcodeCode(resp.Rcode),
 			}
+			// Wrap the canonical sentinels so errors.Is keeps working.
+			switch resp.Rcode {
+			case dns.RcodeNameError:
+				qe.Err = ErrNXDomain
+			case dns.RcodeServerFailure:
+				qe.Err = ErrServFail
+			}
+			return nil, qe
 		}
 		// Handle CNAMEs
 		ans := resp.Answer
@@ -196,7 +238,12 @@ func nxlookup(errorStream chan<- error, client *dns.Client, server, rrtype, host
 func lookup(stream chan<- result, client *dns.Client, rrtype, hostname string, q *Query) {
 	qtype, ok := dns.StringToType[rrtype]
 	if !ok {
-		stream <- result{Error: fmt.Errorf("Error: unhandled type %q", rrtype)}
+		stream <- result{Error: &QueryError{
+			Type:     rrtype,
+			Hostname: hostname,
+			Code:     "UNSUPPORTED_TYPE",
+			Err:      fmt.Errorf("unhandled type %q", rrtype),
+		}}
 		return
 	}
 
