@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+# Binaries are pre-built (statically linked Go) and shipped in bin/ via
+# scripts/build_all.sh. dh_install picks them up via debian/install; the
+# auto build/test/install steps are no-ops.
+override_dh_auto_configure:
+override_dh_auto_build:
+override_dh_auto_test:
+override_dh_auto_install:
