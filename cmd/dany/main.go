@@ -32,7 +32,7 @@ type Options struct {
 	Usd       bool   `short:"u" long:"usd" description:"also lookup TXT records of well-known underscore-subdomains of domain (see below)"`
 	Www       bool   `short:"w" long:"www" description:"also lookup A/AAAA records for www.<hostname>"`
 	Tag       bool   `short:"T" long:"tag" description:"tag output lines with hostname (default to true if multiple hostnames)"`
-	Fmt       string `short:"f" long:"fmt" choice:"text" choice:"json" default:"text" description:"output format"`
+	Fmt       string `short:"f" long:"fmt" choice:"text" choice:"json" choice:"yaml" choice:"yml" default:"text" description:"output format"`
 	Resolvers string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
 	Server    string `short:"s" long:"server" description:"ip address of server to use as resolver"`
 	Args      struct {
@@ -300,6 +300,8 @@ func main() {
 		case "json":
 			// Errors fold into the JSON envelope; nothing goes to stderr.
 			fmt.Fprint(os.Stdout, dany.RenderJSON(answers, q, errs))
+		case "yaml", "yml":
+			fmt.Fprint(os.Stdout, dany.RenderYAML(answers, q, errs))
 		default:
 			if rendered := dany.Render(answers, q.Tag); rendered != "" {
 				fmt.Fprint(os.Stdout, rendered)
