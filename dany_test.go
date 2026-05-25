@@ -156,10 +156,11 @@ func TestRunQuery_Basic(t *testing.T) {
 		Types:    DefaultRRTypes,
 		Server:   srv.Addr,
 	}
-	got, errs := RunQuery(q)
-	if errs != "" {
-		t.Fatalf("RunQuery errors: %s", errs)
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
 	}
+	got := Render(answers, false)
 
 	want := strings.Join([]string{
 		"A\t\t1.2.3.4\n",
@@ -182,12 +183,12 @@ func TestRunQuery_NXDomain(t *testing.T) {
 		Types:    []string{"A", "MX"},
 		Server:   srv.Addr,
 	}
-	got, errs := RunQuery(q)
-	if got != "" {
-		t.Errorf("expected no output, got %q", got)
+	answers, errs := RunQuery(q)
+	if len(answers) != 0 {
+		t.Errorf("expected no answers, got %d: %v", len(answers), answers)
 	}
-	if !strings.Contains(errs, "NXDOMAIN") {
-		t.Errorf("expected NXDOMAIN in errors, got %q", errs)
+	if !errsContain(errs, "NXDOMAIN") {
+		t.Errorf("expected NXDOMAIN in errors, got %v", errs)
 	}
 }
 
@@ -202,14 +203,24 @@ func TestRunQuery_CNAMERequery(t *testing.T) {
 		Types:    []string{"A"},
 		Server:   srv.Addr,
 	}
-	got, errs := RunQuery(q)
-	if errs != "" {
-		t.Fatalf("unexpected errors: %s", errs)
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
 	}
+	got := Render(answers, false)
 	want := "A\t\t1.2.3.4\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
+}
+
+func errsContain(errs []error, substr string) bool {
+	for _, e := range errs {
+		if strings.Contains(e.Error(), substr) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRunNXQuery_NX(t *testing.T) {
