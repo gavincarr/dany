@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Two CLI binaries share one library:
 
 - `dany.go` (repo root) — package `dany`, the shared DNS query engine. Exposes `RunQuery` (typed-ANY aggregation) and `RunNXQuery` (NXDOMAIN probing), plus the `Query`, `Resolvers`, `Result` types and the `DefaultRRTypes` / `SupportedRRTypes` / `NXTypes` / `SupportedUSDs` constants. Imported by the CLIs as `github.com/gavincarr/dany`.
-- `cmd/dany/dany.go` — the `dany` CLI: simulates DNS `ANY` queries by firing the configured RR types (default `SOA,NS,A,AAAA,MX,TXT`) concurrently and aggregating tab-separated results.
-- `cmd/dnx/dnx.go` — the `dnx` CLI: takes hostnames (args or stdin) and reports those that return NXDOMAIN. For safety it runs all `NXTypes` (`MX,NS,SOA`) concurrently per hostname and only reports a host as NX if *every* type returns NXDOMAIN (`RunNXQuery` returns `len(NXTypes) - nxcount`).
+- `cmd/dany/main.go` — the `dany` CLI: simulates DNS `ANY` queries by firing the configured RR types (default `SOA,NS,A,AAAA,MX,TXT`) concurrently and aggregating tab-separated results.
+- `cmd/dnx/main.go` — the `dnx` CLI: takes hostnames (args or stdin) and reports those that return NXDOMAIN. For safety it runs all `NXTypes` (`MX,NS,SOA`) concurrently per hostname and only reports a host as NX if *every* type returns NXDOMAIN (`RunNXQuery` returns `len(NXTypes) - nxcount`).
 
 Module path: `github.com/gavincarr/dany` (Go 1.13, only deps are `miekg/dns` and `jessevdk/go-flags`).
 
@@ -16,7 +16,7 @@ Module path: `github.com/gavincarr/dany` (Go 1.13, only deps are `miekg/dns` and
 
 ```bash
 # Build both binaries (run from each cmd/ dir)
-cd cmd/dany && go build           # or: rake build  (also cross-builds dany_osx)
+cd cmd/dany && go build
 cd cmd/dnx  && go build
 
 # Run all tests in a package
@@ -32,11 +32,9 @@ cd cmd/dnx  && go test -run TestDNXDefaults
 go test -run TestDefaults -update
 ```
 
-The `cmd/dany/Rakefile` builds with `-tags netgo` (pure-Go resolver) and also produces a `dany_osx` cross-build — preserve those flags if editing it.
-
 ## Tests hit the live network
 
-Both `cmd/dany/dany_test.go` and `cmd/dnx/dnx_test.go` are **integration tests against real DNS** (the dany tests pin `@8.8.8.8`; dnx uses `/etc/resolv.conf`). They will fail offline or if upstream records change. Test fixtures live in `testdata/*.golden` and `testdata/golden/`; when records legitimately drift, re-run with `-update` rather than hand-editing the golden files.
+Both `cmd/dany/main_test.go` and `cmd/dnx/main_test.go` are **integration tests against real DNS** (the dany tests pin `@8.8.8.8`; dnx uses `/etc/resolv.conf`). They will fail offline or if upstream records change. Test fixtures live in `testdata/*.golden` and `testdata/golden/`; when records legitimately drift, re-run with `-update` rather than hand-editing the golden files.
 
 `TestTypesParseArgs` randomises argv ordering each run to exercise the positional-arg parser — flakiness in arg-order handling will show up here.
 
