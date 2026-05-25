@@ -1,3 +1,54 @@
+dany (1.0.0) unstable; urgency=medium
+
+  * New flag: -w/--www. Probes the www.<hostname> label in addition to
+    the apex. Defaults to A+AAAA, but honors an explicit -t/--types or
+    -a/--all (so `dany -w -t mx` queries MX against www. too). In
+    tagged mode (-T), apex and www results are emitted on separate
+    hostname-tagged lines; in untagged mode they share the output and
+    identical rows are deduped, so a www that resolves to the apex IP
+    doesn't appear twice. Render also dedups identical lines
+    unconditionally now — only observable when -w introduces duplicates.
+
+  * New flag: -f/--fmt {text,json,yaml,yml}. Adds structured output
+    alongside the default tab-separated text. Each record carries both
+    `rdata` (DNS presentation form) and a typed `data` payload — e.g.
+    `{preference, exchange}` for MX, full RFC field set for SOA,
+    `{strings: [...]}` for TXT. A versioned envelope (schema_version: 1)
+    wraps the per-hostname output; multi-host runs emit NDJSON (json
+    mode) or multi-document YAML (yaml mode, `---`-separated). In
+    structured modes, errors fold into the envelope's `errors` field
+    with a stable machine-readable `code` (NXDOMAIN, SERVFAIL,
+    EXCHANGE_ERROR, UNSUPPORTED_TYPE) — nothing goes to stderr. PTR
+    records (with -p/--ptr) appear as standalone entries with the
+    source IP carried in `data.ip` for easy joining (text mode folds
+    them into the matching A/AAAA row as before). `yml` is a
+    convenience alias for `yaml`.
+
+  * New flag: --version on both `dany` and `dnx`. Long-only (`dnx`
+    already uses -V for --invert); short-circuits print `<name>
+    <version>` and exits before any other validation, so it works
+    without other required arguments.
+
+  * Library: errors from RunQuery / RunNXQuery are now *QueryError
+    (Type, Hostname, Code, Err) instead of fmt.Errorf-wrapped strings.
+    Error() preserves the historical message format and Unwrap exposes
+    the underlying sentinel so errors.Is(err, ErrNXDomain/ErrServFail)
+    continues to work for existing consumers.
+
+  * Build: scripts/build_all.sh now exports CGO_ENABLED=0 so the
+    resulting binaries are unconditionally pure-Go static (no libc /
+    NSS resolver linkage), matching the Debian package description.
+    Also passes -buildvcs=false so VCS metadata isn't baked in and
+    commit-to-commit builds stay byte-stable.
+
+  * Release flow: internal/version/VERSION is the single source of
+    truth for the version string, //go:embed'd into both binaries.
+    `scripts/release.sh <version>` syncs it with debian/changelog,
+    commits, and annotated-tags; the changelog is the structural gate
+    (no stanza, no release).
+
+ -- Gavin Carr <gavin@profound.net>  Mon, 25 May 2026 13:20:47 +0800
+
 dany (0.1.0) unstable; urgency=medium
 
   * Initial Debian packaging.
