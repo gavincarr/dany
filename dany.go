@@ -558,9 +558,20 @@ loop:
 	return strings.Join(resultList, ""), strings.Join(errors, "")
 }
 
-// Run a set of dns queries on q.Hostname, returning the number of
-// non-NXDOMAIN responses i.e. should return 0 for NX domains.
-// Queries q.Types if non-empty, else falls back to NXTypes.
+// RunNXQuery probes q.Hostname across multiple RR types and returns the
+// count of probes that did NOT return NXDOMAIN — i.e. len(types) - nxcount,
+// where types is q.Types if non-empty else NXTypes.
+//
+// Interpretation:
+//   - 0           — every probe returned NXDOMAIN; hostname is fully NX.
+//   - len(types)  — no probe returned NXDOMAIN (either real answers, other
+//                   errors, or timeouts; we can't distinguish these here).
+//   - in between  — partial NXDOMAIN; treated as not-NX by callers (dnx).
+//
+// Probes that time out or error with anything other than ErrNXDomain are
+// counted as non-NX, so transient failures bias toward "not NX" rather than
+// false-positive NXDOMAIN reports.
+//
 // NX probes intentionally stay on UDP regardless of q.Udp — responses are
 // tiny and there is no benefit to TCP for this codepath.
 func RunNXQuery(q *Query) int {
