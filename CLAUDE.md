@@ -19,24 +19,21 @@ Module path: `github.com/gavincarr/dany` (Go 1.13, only deps are `miekg/dns` and
 cd cmd/dany && go build
 cd cmd/dnx  && go build
 
-# Run all tests in a package
-cd cmd/dany && go test ./...
+# Run all (offline) tests
+go test ./...
+
+# Also run the live-DNS smoke tests (requires network + 8.8.8.8 reachable)
+go test -tags integration ./...
 
 # Run one test
-cd cmd/dany && go test -run TestDefaults
-cd cmd/dany && go test -run TestTypesParseArgs
-cd cmd/dany && go test -run TestPtr
-cd cmd/dnx  && go test -run TestDNXDefaults
-
-# Regenerate golden files after an intentional output change
-go test -run TestDefaults -update
+go test -run TestRunQuery_Basic ./...
 ```
 
-## Tests hit the live network
+## Test layout
 
-Both `cmd/dany/main_test.go` and `cmd/dnx/main_test.go` are **integration tests against real DNS** (the dany tests pin `@8.8.8.8`; dnx uses `/etc/resolv.conf`). They will fail offline or if upstream records change. Test fixtures live in `testdata/*.golden` and `testdata/golden/`; when records legitimately drift, re-run with `-update` rather than hand-editing the golden files.
+Default `go test ./...` is **fully offline**. The library's `RunQuery` and `RunNXQuery` are exercised against `internal/testdns`, an in-process `dns.Server` that returns canned RRs you `Add()` per (name, type). Real-world DNS drift can never break the default suite.
 
-`TestTypesParseArgs` randomises argv ordering each run to exercise the positional-arg parser — flakiness in arg-order handling will show up here.
+The two `cmd/*/integration_test.go` files are gated behind `//go:build integration` and hit real DNS (8.8.8.8) for a stable RFC 2606 reserved domain. They're a wire-format smoke check, not regression coverage — keep them small.
 
 ## Architecture notes worth knowing before editing `dany.go`
 

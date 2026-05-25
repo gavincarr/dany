@@ -1,8 +1,0 @@
-MX	10	mx1.simplelogin.co.
-MX	20	mx2.simplelogin.co.
-NS		a.ns.profound.net.
-NS		b.ns.profound.net.
-NS		c.ns.profound.net.
-SOA		a.ns.profound.net. hostmaster.openfusion.com.au.
-TXT		sl-verification=hpkegrugpyoyhjjlvjxqajbucckbqq
-TXT		v=spf1 include:simplelogin.co ~all
