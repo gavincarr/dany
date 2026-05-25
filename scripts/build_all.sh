@@ -26,5 +26,5 @@ fi
 for dir in "${cmds[@]}"; do
   name="$(basename "$dir")"
   echo "building $name → bin/$name"
-  (cd "$ROOT" && go build "$@" -o "$BIN/$name" "./cmd/$name")
+  (cd "$ROOT" && go build -buildvcs=false "$@" -o "$BIN/$name" "./cmd/$name")
 done
