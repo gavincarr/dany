@@ -76,6 +76,55 @@ www.google.com          A               142.251.150.119
 www.google.com          AAAA            2404:6800:4006:80d::2004
 ```
 
+The `-f/--fmt` flag selects the output format: `text` (default, the
+tab-separated form shown above), `json`, or `yaml` (`yml` as a convenience
+alias). In `json` and `yaml` modes:
+
+- Each record carries both `rdata` (the canonical DNS presentation form,
+  always a string) and `data` (a typed per-RR-type payload — `address`
+  for A/AAAA, `preference`+`exchange` for MX, full RFC field set for SOA,
+  `strings` array for TXT, etc.).
+- A `schema_version: 1` envelope wraps the per-hostname output. Multi-
+  hostname runs emit NDJSON (one object per line) in `json` mode and
+  multi-document YAML (`---`-separated) in `yaml` mode.
+- Errors fold into the envelope's `errors` field with a stable machine-
+  readable `code` (`NXDOMAIN`, `SERVFAIL`, `EXCHANGE_ERROR`, …) — nothing
+  goes to stderr.
+- PTR records (when `-p/--ptr` is set) appear as standalone entries with
+  the source IP carried in `data.ip` for easy joining (text mode folds
+  them into the matching A/AAAA row instead).
+
+```
+$ dany -f json -t a,mx example.com
+{"schema_version":1,"query":{"hostname":"example.com","types":["a","mx"],
+"server":"8.8.8.8:53","options":{"www":false,"usd":false,"ptr":false}},
+"answers":[{"type":"A","name":"example.com.","ttl":86400,"class":"IN",
+"rdata":"96.7.128.198","data":{"address":"96.7.128.198"}}],"errors":[]}
+
+$ dany -f yaml -t mx example.com
+---
+schema_version: 1
+query:
+  hostname: example.com
+  types:
+    - mx
+  server: 8.8.8.8:53
+  options:
+    www: false
+    usd: false
+    ptr: false
+answers:
+  - type: MX
+    name: example.com.
+    ttl: 86400
+    class: IN
+    rdata: 10 mx.example.com.
+    data:
+      preference: 10
+      exchange: mx.example.com.
+errors: []
+```
+
 Author
 ------
 
