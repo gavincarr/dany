@@ -14,137 +14,140 @@ import (
 // new RR types, new error codes) do not bump it.
 const SchemaVersion = 1
 
-// Output is the top-level JSON envelope returned per hostname.
+// Output is the top-level envelope returned per hostname. Used as the
+// data model for every renderer (JSON, YAML, ...) — see render_json.go /
+// render_yaml.go for the format-specific wrappers around BuildOutput.
 // Stable shape; new fields may be added but existing fields must not be
 // renamed or removed without bumping SchemaVersion.
 type Output struct {
-	SchemaVersion int           `json:"schema_version"`
-	Query         OutputQuery   `json:"query"`
-	Answers       []OutputAnswer `json:"answers"`
-	Errors        []OutputError  `json:"errors"`
+	SchemaVersion int            `json:"schema_version" yaml:"schema_version"`
+	Query         OutputQuery    `json:"query"          yaml:"query"`
+	Answers       []OutputAnswer `json:"answers"        yaml:"answers"`
+	Errors        []OutputError  `json:"errors"         yaml:"errors"`
 }
 
 type OutputQuery struct {
-	Hostname string        `json:"hostname"`
-	Types    []string      `json:"types"`
-	Server   string        `json:"server"`
-	Options  OutputOptions `json:"options"`
+	Hostname string        `json:"hostname" yaml:"hostname"`
+	Types    []string      `json:"types"    yaml:"types"`
+	Server   string        `json:"server"   yaml:"server"`
+	Options  OutputOptions `json:"options"  yaml:"options"`
 }
 
 type OutputOptions struct {
-	Www bool `json:"www"`
-	Usd bool `json:"usd"`
-	Ptr bool `json:"ptr"`
+	Www bool `json:"www" yaml:"www"`
+	Usd bool `json:"usd" yaml:"usd"`
+	Ptr bool `json:"ptr" yaml:"ptr"`
 }
 
 // OutputAnswer is one DNS resource record. Rdata is the canonical DNS
 // presentation form (always present); Data is the typed per-RR payload —
 // see the per-type *Data structs for shapes.
 type OutputAnswer struct {
-	Type  string      `json:"type"`
-	Name  string      `json:"name"`
-	TTL   uint32      `json:"ttl"`
-	Class string      `json:"class"`
-	Rdata string      `json:"rdata"`
-	Data  interface{} `json:"data"`
+	Type  string      `json:"type"  yaml:"type"`
+	Name  string      `json:"name"  yaml:"name"`
+	TTL   uint32      `json:"ttl"   yaml:"ttl"`
+	Class string      `json:"class" yaml:"class"`
+	Rdata string      `json:"rdata" yaml:"rdata"`
+	Data  interface{} `json:"data"  yaml:"data"`
 }
 
-// OutputError mirrors QueryError for the JSON envelope. Code is a stable
+// OutputError mirrors QueryError for the envelope. Code is a stable
 // machine-readable identifier (e.g. "NXDOMAIN", "SERVFAIL",
 // "EXCHANGE_ERROR", "UNSUPPORTED_TYPE", or "UNKNOWN" for errors lacking a
 // QueryError wrapper). Message preserves the human-readable text.
 type OutputError struct {
-	Type     string `json:"type,omitempty"`
-	Hostname string `json:"hostname,omitempty"`
-	Code     string `json:"code"`
-	Message  string `json:"message"`
+	Type     string `json:"type,omitempty"     yaml:"type,omitempty"`
+	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
+	Code     string `json:"code"               yaml:"code"`
+	Message  string `json:"message"            yaml:"message"`
 }
 
-// Per-RR-type data payloads. Keep field tags snake_case. New RR types
-// require: a new *Data struct, a case in marshalData, and a case in
-// formatAnswer + a formatX helper (for text output).
+// Per-RR-type data payloads. Keep field tags snake_case (json and yaml
+// match). New RR types require: a new *Data struct, a case in
+// marshalData, and a case in formatAnswer + a formatX helper (for text
+// output).
 
 type AData struct {
-	Address string `json:"address"`
+	Address string `json:"address" yaml:"address"`
 }
 
 type AAAAData struct {
-	Address string `json:"address"`
+	Address string `json:"address" yaml:"address"`
 }
 
 type CNAMEData struct {
-	Target string `json:"target"`
+	Target string `json:"target" yaml:"target"`
 }
 
 type NSData struct {
-	Target string `json:"target"`
+	Target string `json:"target" yaml:"target"`
 }
 
 // PTRData carries Target (the resolved hostname) and IP (the original IP
 // the PTR was queried for, recovered from the in-addr.arpa/ip6.arpa name).
 // IP is empty for PTR records that aren't reverse lookups of an IP.
 type PTRData struct {
-	Target string `json:"target"`
-	IP     string `json:"ip,omitempty"`
+	Target string `json:"target"        yaml:"target"`
+	IP     string `json:"ip,omitempty"  yaml:"ip,omitempty"`
 }
 
 type MXData struct {
-	Preference uint16 `json:"preference"`
-	Exchange   string `json:"exchange"`
+	Preference uint16 `json:"preference" yaml:"preference"`
+	Exchange   string `json:"exchange"   yaml:"exchange"`
 }
 
 type SOAData struct {
-	MName   string `json:"mname"`
-	RName   string `json:"rname"`
-	Serial  uint32 `json:"serial"`
-	Refresh uint32 `json:"refresh"`
-	Retry   uint32 `json:"retry"`
-	Expire  uint32 `json:"expire"`
-	Minimum uint32 `json:"minimum"`
+	MName   string `json:"mname"   yaml:"mname"`
+	RName   string `json:"rname"   yaml:"rname"`
+	Serial  uint32 `json:"serial"  yaml:"serial"`
+	Refresh uint32 `json:"refresh" yaml:"refresh"`
+	Retry   uint32 `json:"retry"   yaml:"retry"`
+	Expire  uint32 `json:"expire"  yaml:"expire"`
+	Minimum uint32 `json:"minimum" yaml:"minimum"`
 }
 
 // TXTData exposes the raw multi-string form (TXT can legitimately carry
 // multiple character-strings). Consumers wanting the concatenated text
 // can join them; Rdata also carries the presentation form.
 type TXTData struct {
-	Strings []string `json:"strings"`
+	Strings []string `json:"strings" yaml:"strings"`
 }
 
 type CAAData struct {
-	Flag  uint8  `json:"flag"`
-	Tag   string `json:"tag"`
-	Value string `json:"value"`
+	Flag  uint8  `json:"flag"  yaml:"flag"`
+	Tag   string `json:"tag"   yaml:"tag"`
+	Value string `json:"value" yaml:"value"`
 }
 
 type SRVData struct {
-	Priority uint16 `json:"priority"`
-	Weight   uint16 `json:"weight"`
-	Port     uint16 `json:"port"`
-	Target   string `json:"target"`
+	Priority uint16 `json:"priority" yaml:"priority"`
+	Weight   uint16 `json:"weight"   yaml:"weight"`
+	Port     uint16 `json:"port"     yaml:"port"`
+	Target   string `json:"target"   yaml:"target"`
 }
 
 type DNSKEYData struct {
-	Flags     uint16 `json:"flags"`
-	Protocol  uint8  `json:"protocol"`
-	Algorithm uint8  `json:"algorithm"`
-	PublicKey string `json:"public_key"`
+	Flags     uint16 `json:"flags"      yaml:"flags"`
+	Protocol  uint8  `json:"protocol"   yaml:"protocol"`
+	Algorithm uint8  `json:"algorithm"  yaml:"algorithm"`
+	PublicKey string `json:"public_key" yaml:"public_key"`
 }
 
 type NSECData struct {
-	NextDomain string   `json:"next_domain"`
-	Types      []string `json:"types"`
+	NextDomain string   `json:"next_domain" yaml:"next_domain"`
+	Types      []string `json:"types"       yaml:"types"`
 }
 
 type RRSIGData struct {
-	TypeCovered string `json:"type_covered"`
-	Algorithm   uint8  `json:"algorithm"`
-	Labels      uint8  `json:"labels"`
-	OriginalTTL uint32 `json:"original_ttl"`
-	Expiration  string `json:"expiration"`
-	Inception   string `json:"inception"`
-	KeyTag      uint16 `json:"key_tag"`
-	SignerName  string `json:"signer_name"`
-	Signature   string `json:"signature"`
+	TypeCovered string `json:"type_covered" yaml:"type_covered"`
+	Algorithm   uint8  `json:"algorithm"    yaml:"algorithm"`
+	Labels      uint8  `json:"labels"       yaml:"labels"`
+	OriginalTTL uint32 `json:"original_ttl" yaml:"original_ttl"`
+	Expiration  string `json:"expiration"   yaml:"expiration"`
+	Inception   string `json:"inception"    yaml:"inception"`
+	KeyTag      uint16 `json:"key_tag"      yaml:"key_tag"`
+	SignerName  string `json:"signer_name"  yaml:"signer_name"`
+	Signature   string `json:"signature"    yaml:"signature"`
 }
 
 // BuildOutput assembles the typed Output envelope from a RunQuery result.
