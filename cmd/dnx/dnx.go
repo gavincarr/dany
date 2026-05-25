@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/gavincarr/dany"
 	flags "github.com/jessevdk/go-flags"
@@ -27,6 +28,7 @@ type Options struct {
 	Concurrency int    `short:"C" long:"concurrency" description:"number of hostnames to query concurrently per resolver" default:"3"`
 	Count       bool   `short:"c" long:"count" description:"report all domains and a count of non-NXDOMAIN responses, comma-separated"`
 	Invert      bool   `short:"V" long:"invert" description:"report domains that do NOT return NXDOMAIN"`
+	Types       string `short:"t" long:"types" description:"comma-separated DNS types to probe for NX detection (default: MX,NS,SOA)"`
 	Args        struct {
 		Hostname  string   `description:"hostname/domain to lookup"`
 		Hostname2 []string `description:"additional hostnames/domains to lookup"`
@@ -40,6 +42,8 @@ var parser = flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
 
 func usage() {
 	parser.WriteHelp(os.Stderr)
+	fmt.Fprintf(os.Stderr, "\nDefault NX-probe types: %s\n", strings.Join(dany.NXTypes, ","))
+	fmt.Fprintf(os.Stderr, "Supported DNS resource types: %s\n", strings.Join(dany.SupportedRRTypes, ","))
 	os.Exit(2)
 }
 
@@ -50,36 +54,57 @@ func vprintf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "+ "+format, args...)
 }
 
-// Parse options and return a set of resolvers
-func parseOpts(opts Options) (*dany.Resolvers, error) {
+// Parse options and return a set of resolvers and the list of types to probe
+// (nil/empty means: let dany.RunNXQuery fall back to dany.NXTypes).
+func parseOpts(opts Options) (*dany.Resolvers, []string, error) {
 	var resolvers *dany.Resolvers
+	var types []string
 	var err error
+
+	if opts.Types != "" {
+		typeMap := make(map[string]bool)
+		for _, t := range dany.SupportedRRTypes {
+			typeMap[t] = true
+			typeMap[strings.ToLower(t)] = true
+		}
+		types = strings.Split(opts.Types, ",")
+		var bad []string
+		for _, t := range types {
+			if !typeMap[t] {
+				bad = append(bad, t)
+			}
+		}
+		if len(bad) > 0 {
+			return nil, nil, fmt.Errorf("Error: unsupported types in %q: %s",
+				opts.Types, strings.Join(bad, ","))
+		}
+	}
 
 	if opts.Server != "" {
 		// Parse opts.Server
 		serverIP := net.ParseIP(opts.Server)
 		if serverIP == nil {
 			err = fmt.Errorf("Error: unable to parse --server ip address %q", opts.Server)
-			return nil, err
+			return nil, nil, err
 		}
 		resolvers = dany.NewResolvers(serverIP)
 	} else if opts.Resolvers != "" {
 		// Parse opts.Resolvers
 		resolvers, err = dany.LoadResolvers(opts.Resolvers)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	} else {
 		// No Server or Resolvers option set - use /etc/resolv.conf
 		config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, server := range config.Servers {
 			serverIP := net.ParseIP(server)
 			if serverIP == nil {
 				err = fmt.Errorf("Error: unable to parse --server ip address %q", opts.Server)
-				return nil, err
+				return nil, nil, err
 			}
 			if resolvers == nil {
 				resolvers = dany.NewResolvers(serverIP)
@@ -90,18 +115,21 @@ func parseOpts(opts Options) (*dany.Resolvers, error) {
 	}
 
 	vprintf("resolvers: %v\n", resolvers.List)
+	if len(types) > 0 {
+		vprintf("types: %v\n", types)
+	}
 
-	return resolvers, nil
+	return resolvers, types, nil
 }
 
-func processHostname(sem chan bool, hostname string, resolvers *dany.Resolvers) {
+func processHostname(sem chan bool, hostname string, resolvers *dany.Resolvers, types []string) {
 	// Release semaphore slot at end of function
 	defer func() { <-sem }()
 
 	server := net.JoinHostPort(resolvers.Next().String(), dnsPort)
 
 	vprintf("looking up %s using %s\n", hostname, server)
-	responseCount := dany.RunNXQuery(&dany.Query{Hostname: hostname, Server: server})
+	responseCount := dany.RunNXQuery(&dany.Query{Hostname: hostname, Server: server, Types: types})
 	if opts.Count {
 		fmt.Printf("%s,%d\n", hostname, responseCount)
 		return
@@ -126,7 +154,7 @@ func main() {
 
 	// Setup
 	log.SetFlags(0)
-	resolvers, err := parseOpts(opts)
+	resolvers, types, err := parseOpts(opts)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -144,7 +172,7 @@ func main() {
 		// Do lookups
 		for _, hostname := range args {
 			sem <- true
-			go processHostname(sem, hostname, resolvers)
+			go processHostname(sem, hostname, resolvers, types)
 		}
 	} else {
 		// Stdin version
@@ -152,7 +180,7 @@ func main() {
 		for scanner.Scan() {
 			hostname := scanner.Text()
 			sem <- true
-			go processHostname(sem, hostname, resolvers)
+			go processHostname(sem, hostname, resolvers, types)
 		}
 	}
 	// Wait for remaining goroutines by refilling all sem slots

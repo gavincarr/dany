@@ -558,19 +558,28 @@ loop:
 	return strings.Join(resultList, ""), strings.Join(errors, "")
 }
 
-// Run a set of NXTypes dns queries on q.Hostname, returning the number of
+// Run a set of dns queries on q.Hostname, returning the number of
 // non-NXDOMAIN responses i.e. should return 0 for NX domains.
+// Queries q.Types if non-empty, else falls back to NXTypes.
 // NX probes intentionally stay on UDP regardless of q.Udp — responses are
 // tiny and there is no benefit to TCP for this codepath.
 func RunNXQuery(q *Query) int {
+	types := NXTypes
+	if len(q.Types) > 0 {
+		types = make([]string, len(q.Types))
+		for i, t := range q.Types {
+			types[i] = strings.ToUpper(t)
+		}
+	}
+
 	// Do lookups, using errorStream to gather results
-	errorStream := make(chan error, len(NXTypes))
+	errorStream := make(chan error, len(types))
 	client := new(dns.Client)
 	// Set client timeouts (dial/read/write) to timeoutSeconds / 2
 	client.Timeout = timeoutSeconds / 2 * time.Second
 	// Run standard lookups
 	count := 0
-	for _, t := range NXTypes {
+	for _, t := range types {
 		go nxlookup(errorStream, client, q.Server, t, q.Hostname)
 		count++
 	}
@@ -594,5 +603,5 @@ loop:
 		}
 	}
 
-	return len(NXTypes) - nxcount
+	return len(types) - nxcount
 }

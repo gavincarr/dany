@@ -28,7 +28,7 @@ func TestDNXDefaults(t *testing.T) {
 		log.Fatal(err)
 	}
 
-	resolvers, err := parseOpts(opts)
+	resolvers, _, err := parseOpts(opts)
 	if err != nil {
 		log.Fatal(err)
 	}
