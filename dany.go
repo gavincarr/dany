@@ -97,10 +97,24 @@ type Query struct {
 	Tag          bool
 }
 
-// dany query Result
-type Result struct {
-	Label   string
-	Results string
+// Answer is a single DNS resource record returned from a typed query.
+// Type is the queried RR type, uppercase ("A", "MX", "TXT", ...) — plus
+// "PTR" for reverse-lookups synthesised when q.Ptr is set.
+// Hostname is the queried hostname (e.g. "example.com", or "_dmarc.example.com"
+// for USD probes; for PTR Answers it is the IP whose PTR was looked up, in
+// dotted/colon form).
+// RR is the raw record from miekg/dns.
+type Answer struct {
+	Type     string
+	Hostname string
+	RR       dns.RR
+}
+
+// result is the internal channel message used by RunQuery's goroutine
+// fan-out. Each typed lookup emits one result carrying zero or more Answers
+// (including any PTR follow-ups for A/AAAA lookups) plus an optional error.
+type result struct {
+	Answers []Answer
 	Error   error
 }
 
@@ -169,393 +183,297 @@ func nxlookup(errorStream chan<- error, client *dns.Client, server, rrtype, host
 	errorStream <- err
 }
 
-func lookup(resultStream chan<- Result, client *dns.Client, rrtype, hostname string, q *Query) {
-	server := q.Server
-	ignoreErrors := q.IgnoreErrors
+// lookup performs a single typed DNS query and emits one result on stream
+// carrying the answer records as []Answer. For A/AAAA queries with q.Ptr
+// set, it also fans out PTR lookups in parallel and appends PTR-typed
+// Answers (Hostname=IP, RR=*dns.PTR) to the same slice.
+func lookup(stream chan<- result, client *dns.Client, rrtype, hostname string, q *Query) {
+	qtype, ok := dns.StringToType[rrtype]
+	if !ok {
+		stream <- result{Error: fmt.Errorf("Error: unhandled type %q", rrtype)}
+		return
+	}
 
 	msg := new(dns.Msg)
 	msg.RecursionDesired = true
+	msg.SetQuestion(dns.Fqdn(hostname), qtype)
 
-	var resultList []string
-	var err error
-	var resp *dns.Msg
-	switch rrtype {
-	case "A":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeA)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			var ptrMap map[string]string
-			if q.Ptr {
-				ptrMap = ptrLookupAll(client, server, rrtype, resp)
-			}
-			resultList = formatA(rrtype, resp, ptrMap)
-		}
-	case "AAAA":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeAAAA)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			var ptrMap map[string]string
-			if q.Ptr {
-				ptrMap = ptrLookupAll(client, server, rrtype, resp)
-			}
-			resultList = formatAAAA(rrtype, resp, ptrMap)
-		}
-	case "CAA":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCAA)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			resultList = formatCAA(rrtype, resp)
-		}
-	case "CNAME":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeCNAME)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			resultList = formatCNAME(rrtype, resp)
-		}
-	case "DNSKEY":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeDNSKEY)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			resultList = formatDNSKEY(rrtype, resp)
-		}
-	case "MX":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeMX)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			resultList = formatMX(rrtype, resp)
-		}
-	case "NS":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNS)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			resultList = formatNS(rrtype, resp)
-		}
-	case "NSEC":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeNSEC)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			resultList = formatNSEC(rrtype, resp)
-		}
-	case "RRSIG":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeRRSIG)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			resultList = formatRRSIG(rrtype, resp)
-		}
-	case "SOA":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSOA)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			resultList = formatSOA(rrtype, resp)
-		}
-	case "SRV":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeSRV)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			resultList = formatSRV(rrtype, resp)
-		}
-	case "TXT":
-		msg.SetQuestion(dns.Fqdn(hostname), dns.TypeTXT)
-		resp, err = dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
-		if err == nil && resp != nil {
-			resultList = formatTXT(rrtype, resp)
-		}
-	default:
-		err = fmt.Errorf("Error: unhandled type %q", rrtype)
+	resp, err := dnsLookup(client, q.Server, msg, rrtype, hostname, q.IgnoreErrors)
+	if err != nil || resp == nil {
+		stream <- result{Error: err}
+		return
 	}
 
-	sort.Strings(resultList)
-	var results string
-	if q.Tag && len(resultList) > 0 {
-		tag := hostname + "\t"
-		for _, r := range resultList {
-			results = results + tag + r
-		}
-	} else {
-		results = strings.Join(resultList, "")
+	answers := make([]Answer, 0, len(resp.Answer))
+	for _, rr := range resp.Answer {
+		answers = append(answers, Answer{Type: rrtype, Hostname: hostname, RR: rr})
 	}
 
-	res := Result{Label: rrtype, Results: results, Error: err}
-	resultStream <- res
+	if q.Ptr && (rrtype == "A" || rrtype == "AAAA") {
+		answers = append(answers, ptrLookupAll(client, q.Server, resp.Answer)...)
+	}
+
+	stream <- result{Answers: answers}
 }
 
-func ptrLookupOne(resultStream chan<- Result, client *dns.Client, server, ip, ipArpa string) {
+// ptrLookupOne issues a single PTR query for ipArpa and emits a result
+// carrying one Answer per dns.PTR RR in the response. The Hostname field
+// on each Answer is the original IP (in dotted/colon form), so Render
+// can group PTRs back by IP without re-parsing the in-addr.arpa name.
+// PTR lookup failures are silently dropped (matching prior behavior).
+func ptrLookupOne(stream chan<- result, client *dns.Client, server, ip, ipArpa string) {
 	msg := new(dns.Msg)
 	msg.RecursionDesired = true
 	msg.SetQuestion(ipArpa, dns.TypePTR)
 
 	resp, _, err := client.Exchange(msg, server)
-	// Return exchange errors
-	if err != nil {
-		err = fmt.Errorf("Error on PTR lookup for %q: %s", ip, err)
-	}
-	// Silently give up on dns errors (resp.Rcode != dns.RcodeSuccess)
-	if resp.Rcode != dns.RcodeSuccess {
-		//vprintf("dns error on PTR lookup on %s: %s\n", ip, dns.RcodeToString[resp.Rcode])
+	if err != nil || resp == nil || resp.Rcode != dns.RcodeSuccess {
+		stream <- result{}
+		return
 	}
 
-	var resultText string
-	if resp != nil {
-		resultText = formatPTRAppend(resp)
+	var answers []Answer
+	for _, rr := range resp.Answer {
+		if _, ok := rr.(*dns.PTR); ok {
+			answers = append(answers, Answer{Type: "PTR", Hostname: ip, RR: rr})
+		}
 	}
-	res := Result{Label: ip, Results: resultText, Error: err}
-	resultStream <- res
+	stream <- result{Answers: answers}
 }
 
-func ptrLookupAll(client *dns.Client, server, rrtype string, resp *dns.Msg) map[string]string {
-	resultStream := make(chan Result)
-	ptrMap := make(map[string]string)
+// ptrLookupAll fans out PTR queries for the A/AAAA records in addrRRs and
+// returns the collected PTR Answers. Blocks until all goroutines respond
+// or timeoutSeconds elapses.
+func ptrLookupAll(client *dns.Client, server string, addrRRs []dns.RR) []Answer {
+	stream := make(chan result)
 
 	count := 0
-	for _, ans := range resp.Answer {
-		// Extract ip
+	for _, rr := range addrRRs {
 		var ip string
-		if rr, ok := ans.(*dns.A); ok {
-			ip = rr.A.String()
-		} else if rr, ok := ans.(*dns.AAAA); ok {
-			ip = rr.AAAA.String()
-		}
-
-		// Do PTR lookup
-		ipArpa, err := dns.ReverseAddr(ip)
-		if err != nil {
-			//vprintf("Warning: failed to convert ip %q to arpa form\n", ip)
+		switch x := rr.(type) {
+		case *dns.A:
+			ip = x.A.String()
+		case *dns.AAAA:
+			ip = x.AAAA.String()
+		default:
 			continue
 		}
-
-		//vprintf("doing %s PTR lookup on %s\n", rrtype, ip)
+		ipArpa, err := dns.ReverseAddr(ip)
+		if err != nil {
+			continue
+		}
 		count++
-		go ptrLookupOne(resultStream, client, server, ip, ipArpa)
+		go ptrLookupOne(stream, client, server, ip, ipArpa)
 	}
 
+	var out []Answer
 loop:
 	for count > 0 {
 		select {
-		// Get results from resultStream
-		case res := <-resultStream:
-			if res.Results != "" {
-				ptrMap[res.Label] = res.Results
-			} else {
-				//vprintf("%s query returned no data\n", res.Label+" PTR")
-			}
+		case res := <-stream:
+			out = append(out, res.Answers...)
 			count--
-		// Timeout if some results just take too long
 		case <-time.After(timeoutSeconds * time.Second):
 			break loop
 		}
 	}
-
-	return ptrMap
+	return out
 }
 
-func formatA(rrtype string, resp *dns.Msg, ptrMap map[string]string) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.A)
-		ip := rr.A.String()
-		ptrEntry := ""
-		if ptrMap != nil {
-			if pe, ok := ptrMap[ip]; ok {
-				ptrEntry = "\t" + pe
-			}
+// Each formatX helper formats a single RR of its type into one
+// `\n`-terminated tab-separated line. They are called from Render (not from
+// the query path) so they perform no I/O.
+
+func formatA(rrtype string, rr *dns.A, ptrMap map[string]string) string {
+	ip := rr.A.String()
+	ptrEntry := ""
+	if pe, ok := ptrMap[ip]; ok {
+		ptrEntry = "\t" + pe
+	}
+	return fmt.Sprintf("%s\t\t%s%s\n", rrtype, ip, ptrEntry)
+}
+
+func formatAAAA(rrtype string, rr *dns.AAAA, ptrMap map[string]string) string {
+	ip := rr.AAAA.String()
+	ptrEntry := ""
+	if pe, ok := ptrMap[ip]; ok {
+		ptrEntry = "\t" + pe
+	}
+	return fmt.Sprintf("%s\t\t%s%s\n", rrtype, ip, ptrEntry)
+}
+
+func formatCAA(rrtype string, rr *dns.CAA) string {
+	return fmt.Sprintf("%s\t%d\t%s %s\n", rrtype, rr.Flag, rr.Tag, rr.Value)
+}
+
+func formatCNAME(rrtype string, rr *dns.CNAME) string {
+	return fmt.Sprintf("%s\t\t%s\n", rrtype, rr.Target)
+}
+
+func formatDNSKEY(rrtype string, rr *dns.DNSKEY) string {
+	return fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Flags, rr.Protocol, rr.Algorithm, rr.PublicKey)
+}
+
+func formatMX(rrtype string, rr *dns.MX) string {
+	return fmt.Sprintf("%s\t%d\t%s\n", rrtype, rr.Preference, rr.Mx)
+}
+
+func formatNS(rrtype string, rr *dns.NS) string {
+	return fmt.Sprintf("%s\t\t%s\n", rrtype, rr.Ns)
+}
+
+func formatNSEC(rrtype string, rr *dns.NSEC) string {
+	s := fmt.Sprintf("%s\t\t%s", rrtype, rr.NextDomain)
+	for _, t := range rr.TypeBitMap {
+		s += " " + dns.Type(t).String()
+	}
+	return s + "\n"
+}
+
+func formatRRSIG(rrtype string, rr *dns.RRSIG) string {
+	return fmt.Sprintf("%s\t\t%s %d %d %d %s %s %d %s %s\n",
+		rrtype, dns.Type(rr.TypeCovered).String(),
+		rr.Algorithm, rr.Labels, rr.OrigTtl,
+		dns.TimeToString(rr.Expiration), dns.TimeToString(rr.Inception),
+		rr.KeyTag, rr.SignerName, rr.Signature,
+	)
+}
+
+func formatSOA(rrtype string, rr *dns.SOA) string {
+	return fmt.Sprintf("%s\t\t%s %s\n", rrtype, rr.Ns, rr.Mbox)
+}
+
+func formatSRV(rrtype string, rr *dns.SRV) string {
+	return fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Priority, rr.Weight, rr.Port, rr.Target)
+}
+
+func formatTXT(rrtype string, rr *dns.TXT) string {
+	return fmt.Sprintf("%s\t\t%s\n", rrtype, strings.Join(rr.Txt, ""))
+}
+
+// Render turns a slice of Answers into the canonical dany text output:
+// one tab-separated `\n`-terminated line per non-PTR Answer, with PTR
+// records folded into their corresponding A/AAAA lines, sorted globally.
+// If tagHostname is true each line is prefixed with the queried hostname
+// and a tab — useful when caller is multiplexing multiple hostnames.
+// Render does no I/O.
+func Render(answers []Answer, tagHostname bool) string {
+	// Fold PTR Answers into an ip -> "target1 target2 ..." map.
+	// Multiple PTRs for one IP are sorted alphabetically and space-joined,
+	// matching the legacy formatPTRAppend behavior.
+	ptrTargets := make(map[string][]string)
+	for _, a := range answers {
+		if a.Type != "PTR" {
+			continue
 		}
-		elts = append(elts,
-			fmt.Sprintf("%s\t\t%s%s\n", rrtype, ip, ptrEntry))
-	}
-	return elts
-}
-
-func formatAAAA(rrtype string, resp *dns.Msg, ptrMap map[string]string) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.AAAA)
-		ip := rr.AAAA.String()
-		ptrEntry := ""
-		if ptrMap != nil {
-			if pe, ok := ptrMap[ip]; ok {
-				ptrEntry = "\t" + pe
-			}
+		if rr, ok := a.RR.(*dns.PTR); ok {
+			ptrTargets[a.Hostname] = append(ptrTargets[a.Hostname], rr.Ptr)
 		}
-		elts = append(elts,
-			fmt.Sprintf("%s\t\t%s%s\n", rrtype, ip, ptrEntry))
 	}
-	return elts
-}
-
-func formatCAA(rrtype string, resp *dns.Msg) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.CAA)
-		elts = append(elts,
-			fmt.Sprintf("%s\t%d\t%s %s\n", rrtype, rr.Flag, rr.Tag, rr.Value))
+	ptrMap := make(map[string]string, len(ptrTargets))
+	for ip, targets := range ptrTargets {
+		sort.Strings(targets)
+		ptrMap[ip] = strings.Join(targets, " ")
 	}
-	return elts
-}
 
-func formatCNAME(rrtype string, resp *dns.Msg) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.CNAME)
-		elts = append(elts,
-			fmt.Sprintf("%s\t\t%s\n", rrtype, rr.Target))
-	}
-	return elts
-}
-
-func formatDNSKEY(rrtype string, resp *dns.Msg) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.DNSKEY)
-		elts = append(elts,
-			fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Flags, rr.Protocol, rr.Algorithm, rr.PublicKey))
-	}
-	return elts
-}
-
-func formatMX(rrtype string, resp *dns.Msg) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.MX)
-		elts = append(elts,
-			fmt.Sprintf("%s\t%d\t%s\n", rrtype, rr.Preference, rr.Mx))
-	}
-	return elts
-}
-
-func formatNS(rrtype string, resp *dns.Msg) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.NS)
-		elts = append(elts, fmt.Sprintf("%s\t\t%s\n", rrtype, rr.Ns))
-	}
-	return elts
-}
-
-func formatNSEC(rrtype string, resp *dns.Msg) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.NSEC)
-		s := fmt.Sprintf("%s\t\t%s", rrtype, rr.NextDomain)
-		for _, t := range rr.TypeBitMap {
-			s += " " + dns.Type(t).String()
+	var lines []string
+	for _, a := range answers {
+		line := formatAnswer(a, ptrMap)
+		if line == "" {
+			continue
 		}
-		s += "\n"
-		elts = append(elts, s)
+		if tagHostname {
+			line = a.Hostname + "\t" + line
+		}
+		lines = append(lines, line)
 	}
-	return elts
+	sort.Strings(lines)
+	return strings.Join(lines, "")
 }
 
-func formatPTRAppend(resp *dns.Msg) string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.PTR)
-		elts = append(elts, rr.Ptr)
+// formatAnswer renders a single Answer into one `\n`-terminated line,
+// dispatching to the per-RR formatX helpers. Returns "" for Answers whose
+// Type doesn't have a registered formatter (notably PTR, which is folded
+// into A/AAAA output by Render rather than emitted as its own line).
+func formatAnswer(a Answer, ptrMap map[string]string) string {
+	switch rr := a.RR.(type) {
+	case *dns.A:
+		return formatA(a.Type, rr, ptrMap)
+	case *dns.AAAA:
+		return formatAAAA(a.Type, rr, ptrMap)
+	case *dns.CAA:
+		return formatCAA(a.Type, rr)
+	case *dns.CNAME:
+		return formatCNAME(a.Type, rr)
+	case *dns.DNSKEY:
+		return formatDNSKEY(a.Type, rr)
+	case *dns.MX:
+		return formatMX(a.Type, rr)
+	case *dns.NS:
+		return formatNS(a.Type, rr)
+	case *dns.NSEC:
+		return formatNSEC(a.Type, rr)
+	case *dns.RRSIG:
+		return formatRRSIG(a.Type, rr)
+	case *dns.SOA:
+		return formatSOA(a.Type, rr)
+	case *dns.SRV:
+		return formatSRV(a.Type, rr)
+	case *dns.TXT:
+		return formatTXT(a.Type, rr)
 	}
-	sort.Strings(elts)
-	return strings.Join(elts, " ")
+	return ""
 }
 
-func formatRRSIG(rrtype string, resp *dns.Msg) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.RRSIG)
-		elts = append(elts,
-			fmt.Sprintf("%s\t\t%s %d %d %d %s %s %d %s %s\n",
-				rrtype, dns.Type(rr.TypeCovered).String(),
-				rr.Algorithm, rr.Labels, rr.OrigTtl,
-				dns.TimeToString(rr.Expiration), dns.TimeToString(rr.Inception),
-				rr.KeyTag, rr.SignerName, rr.Signature,
-			))
+// RunQuery fans out concurrent typed DNS lookups for q.Hostname across
+// q.Types (plus USD TXT probes if q.Usd is set, plus PTR follow-ups for
+// A/AAAA if q.Ptr is set) and returns the collected Answers and per-query
+// errors. The returned slice is unsorted; pass it through Render for the
+// canonical tab-separated text representation.
+//
+// On wall-clock timeout (timeoutSeconds), in-flight goroutines' results
+// are silently dropped — they appear as neither Answers nor errors.
+func RunQuery(q *Query) ([]Answer, []error) {
+	count := len(q.Types)
+	if q.Usd {
+		count += len(SupportedUSDs)
 	}
-	return elts
-}
+	stream := make(chan result, count)
 
-func formatSOA(rrtype string, resp *dns.Msg) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.SOA)
-		elts = append(elts,
-			fmt.Sprintf("%s\t\t%s %s\n", rrtype, rr.Ns, rr.Mbox))
-	}
-	return elts
-}
-
-func formatSRV(rrtype string, resp *dns.Msg) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.SRV)
-		elts = append(elts,
-			fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Priority, rr.Weight, rr.Port, rr.Target))
-	}
-	return elts
-}
-
-func formatTXT(rrtype string, resp *dns.Msg) []string {
-	var elts []string
-	for _, ans := range resp.Answer {
-		rr := ans.(*dns.TXT)
-		elts = append(elts,
-			fmt.Sprintf("%s\t\t%s\n", rrtype, strings.Join(rr.Txt, "")))
-	}
-	return elts
-}
-
-func RunQuery(q *Query) (string, string) {
-	// Do lookups, using resultStream to gather results
-	resultStream := make(chan Result, len(q.Types))
 	client := new(dns.Client)
-	// We're often going to want long records like TXT or DNSKEY, so let's default to use tcp
+	// Default to TCP; TXT/DNSKEY responses are often too big for UDP.
 	if !q.Udp {
 		client.Net = "tcp"
 	}
-	// Set client timeouts (dial/read/write) to timeoutSeconds / 2
 	client.Timeout = timeoutSeconds / 2 * time.Second
-	// Run standard lookups
-	count := 0
-	h := q.Hostname
+
 	for _, t := range q.Types {
-		go lookup(resultStream, client, strings.ToUpper(t), h, q)
-		count++
+		go lookup(stream, client, strings.ToUpper(t), q.Hostname, q)
 	}
-	// Add USD TXT lookups
 	if q.Usd {
 		q.IgnoreErrors = true
-		domain := h
 		for _, usd := range SupportedUSDs {
-			h = usd + "." + domain
-			go lookup(resultStream, client, "TXT", h, q)
-			count++
+			go lookup(stream, client, "TXT", usd+"."+q.Hostname, q)
 		}
 	}
 
-	var resultList []string
-	var errors []string
+	var answers []Answer
+	var errs []error
 loop:
-	for {
+	for count > 0 {
 		select {
-		// Get results from resultStream
-		case res := <-resultStream:
+		case res := <-stream:
 			if res.Error != nil {
-				errors = append(errors, res.Error.Error()+"\n")
-			} else if res.Results != "" {
-				resultList = append(resultList, res.Results)
-			} else {
-				//vprintf("%s query returned no data\n", res.Label)
+				errs = append(errs, res.Error)
 			}
+			answers = append(answers, res.Answers...)
 			count--
-			if count <= 0 {
-				break loop
-			}
-		// Timeout if some results just take too long
 		case <-time.After(timeoutSeconds * time.Second):
 			break loop
 		}
 	}
 
-	// Sort text results
-	sort.Strings(resultList)
-
-	return strings.Join(resultList, ""), strings.Join(errors, "")
+	return answers, errs
 }
 
 // RunNXQuery probes q.Hostname across multiple RR types and returns the

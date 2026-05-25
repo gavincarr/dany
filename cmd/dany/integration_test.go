@@ -22,10 +22,11 @@ func TestIntegrationSmoke(t *testing.T) {
 	q.Hostname = "example.com"
 	q.Server = net.JoinHostPort(q.Resolvers.Next().String(), dnsPort)
 
-	out, errs := dany.RunQuery(q)
-	if errs != "" {
-		t.Fatalf("RunQuery errors: %s", errs)
+	answers, errs := dany.RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
 	}
+	out := dany.Render(answers, false)
 	for _, want := range []string{"A\t", "SOA\t"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q line:\n%s", want, out)

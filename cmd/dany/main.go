@@ -255,12 +255,12 @@ func main() {
 			vprintf("server: %s\n", q.Server)
 		}
 
-		results, errors := dany.RunQuery(q)
-		if results != "" {
-			fmt.Fprint(os.Stdout, results)
+		answers, errs := dany.RunQuery(q)
+		if rendered := dany.Render(answers, q.Tag); rendered != "" {
+			fmt.Fprint(os.Stdout, rendered)
 		}
-		if errors != "" {
-			fmt.Fprint(os.Stderr, errors)
+		for _, e := range errs {
+			fmt.Fprintln(os.Stderr, e)
 		}
 	}
 }
