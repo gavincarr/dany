@@ -6,9 +6,9 @@ atl-smtp-out.delta.com
 author.delta.com
 avedge.cfitrl.delta.com
 avedge.delta.com
-b.e.delta.com
 c.mx.e.delta.com
 del.delta.com
+deltamilestones.delta.com
 dev-voice.delta.com
 dev.delta.com
 dev.tellme.delta.com
