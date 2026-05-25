@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gavincarr/dany/internal/testdns"
+	"github.com/miekg/dns"
 )
 
 func TestNewResolvers(t *testing.T) {
@@ -136,5 +139,121 @@ func TestLoadResolversMissingFile(t *testing.T) {
 	_, err := LoadResolvers(filepath.Join(t.TempDir(), "does-not-exist"))
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
+	}
+}
+
+func TestRunQuery_Basic(t *testing.T) {
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+	srv.Add(testdns.MustRR("example.com. 300 IN A 5.6.7.8"))
+	srv.Add(testdns.MustRR("example.com. 300 IN MX 10 mx1.example.com."))
+	srv.Add(testdns.MustRR("example.com. 300 IN MX 20 mx2.example.com."))
+	srv.Add(testdns.MustRR("example.com. 300 IN TXT \"v=spf1 -all\""))
+	// SOA, NS, AAAA are unregistered → NoData (no output)
+
+	q := &Query{
+		Hostname: "example.com",
+		Types:    DefaultRRTypes,
+		Server:   srv.Addr,
+	}
+	got, errs := RunQuery(q)
+	if errs != "" {
+		t.Fatalf("RunQuery errors: %s", errs)
+	}
+
+	want := strings.Join([]string{
+		"A\t\t1.2.3.4\n",
+		"A\t\t5.6.7.8\n",
+		"MX\t10\tmx1.example.com.\n",
+		"MX\t20\tmx2.example.com.\n",
+		"TXT\t\tv=spf1 -all\n",
+	}, "")
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestRunQuery_NXDomain(t *testing.T) {
+	srv := testdns.New(t)
+	// Don't register anything → every query returns NXDOMAIN
+
+	q := &Query{
+		Hostname: "missing.example.com",
+		Types:    []string{"A", "MX"},
+		Server:   srv.Addr,
+	}
+	got, errs := RunQuery(q)
+	if got != "" {
+		t.Errorf("expected no output, got %q", got)
+	}
+	if !strings.Contains(errs, "NXDOMAIN") {
+		t.Errorf("expected NXDOMAIN in errors, got %q", errs)
+	}
+}
+
+func TestRunQuery_CNAMERequery(t *testing.T) {
+	srv := testdns.New(t)
+	// www.example.com → CNAME → example.com → A
+	srv.Add(testdns.MustRR("www.example.com. 300 IN CNAME example.com."))
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+
+	q := &Query{
+		Hostname: "www.example.com",
+		Types:    []string{"A"},
+		Server:   srv.Addr,
+	}
+	got, errs := RunQuery(q)
+	if errs != "" {
+		t.Fatalf("unexpected errors: %s", errs)
+	}
+	want := "A\t\t1.2.3.4\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRunNXQuery_NX(t *testing.T) {
+	srv := testdns.New(t)
+	q := &Query{Hostname: "totally-missing.example.com", Server: srv.Addr}
+	if n := RunNXQuery(q); n != 0 {
+		t.Errorf("RunNXQuery on unregistered name = %d, want 0", n)
+	}
+}
+
+func TestRunNXQuery_NotNX(t *testing.T) {
+	srv := testdns.New(t)
+	// Register SOA only — MX and NS will be NoData (NoError + empty answer),
+	// not NXDOMAIN. So responseCount should be 3 (none of the three returned NXDOMAIN).
+	srv.Add(testdns.MustRR("present.example.com. 300 IN SOA ns.example.com. hostmaster.example.com. 1 7200 3600 1209600 3600"))
+
+	q := &Query{Hostname: "present.example.com", Server: srv.Addr}
+	if n := RunNXQuery(q); n != 3 {
+		t.Errorf("RunNXQuery on existing name = %d, want 3", n)
+	}
+}
+
+func TestRunNXQuery_CustomTypes(t *testing.T) {
+	srv := testdns.New(t)
+	// Email-style probe: only MX matters. Name has no MX → NXDOMAIN-for-purposes-of-the-probe.
+	q := &Query{
+		Hostname: "no-mx.example.com",
+		Types:    []string{"MX"},
+		Server:   srv.Addr,
+	}
+	if n := RunNXQuery(q); n != 0 {
+		t.Errorf("RunNXQuery(MX only) on unregistered name = %d, want 0", n)
+	}
+}
+
+func TestRunNXQuery_ServFail(t *testing.T) {
+	srv := testdns.New(t)
+	// SERVFAIL on all three default NXTypes → none counted as NXDOMAIN, so
+	// responseCount = 3 (i.e. "not NX, looks alive").
+	for _, qt := range []uint16{dns.TypeMX, dns.TypeNS, dns.TypeSOA} {
+		srv.SetRcode("flaky.example.com", qt, dns.RcodeServerFailure)
+	}
+	q := &Query{Hostname: "flaky.example.com", Server: srv.Addr}
+	if n := RunNXQuery(q); n != 3 {
+		t.Errorf("RunNXQuery on SERVFAIL name = %d, want 3 (SERVFAIL is not NXDOMAIN)", n)
 	}
 }
