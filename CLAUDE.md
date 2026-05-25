@@ -14,6 +14,8 @@ Two CLI binaries share one library:
 
 Module path: `github.com/gavincarr/dany` (Go 1.25, deps: `miekg/dns`, `jessevdk/go-flags`, `gopkg.in/yaml.v3`).
 
+Versioning: `internal/version/VERSION` is the single source of truth — a `//go:embed`'d plain-semver string read into both CLIs (`dany --version` / `dnx --version`). `scripts/release.sh <version>` syncs it with `debian/changelog`, commits, and tags. The changelog is the *structural* gate: the release script refuses to tag unless the head stanza version matches the requested arg, so there is no path to releasing a version that hasn't been written about.
+
 ## Build / test commands
 
 ```bash

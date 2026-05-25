@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gavincarr/dany"
+	"github.com/gavincarr/dany/internal/version"
 	flags "github.com/jessevdk/go-flags"
 	"github.com/miekg/dns"
 )
@@ -20,6 +21,7 @@ const (
 	dnsPort        = "53"
 	fallbackServer = "8.8.8.8"
 	resolvConfPath = "/etc/resolv.conf"
+	name           = "dany"
 )
 
 // Options
@@ -33,6 +35,7 @@ type Options struct {
 	Www       bool   `short:"w" long:"www" description:"also lookup A/AAAA records for www.<hostname>"`
 	Tag       bool   `short:"T" long:"tag" description:"tag output lines with hostname (default to true if multiple hostnames)"`
 	Fmt       string `short:"f" long:"fmt" choice:"text" choice:"json" choice:"yaml" choice:"yml" default:"text" description:"output format"`
+	Version   bool   `          long:"version" description:"print version and exit"`
 	Resolvers string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
 	Server    string `short:"s" long:"server" description:"ip address of server to use as resolver"`
 	Args      struct {
@@ -263,6 +266,13 @@ func main() {
 			fmt.Fprintf(os.Stderr, "%s\n\n", err)
 		}
 		usage()
+	}
+
+	// --version is a short-circuit: print and exit before any further
+	// validation (so e.g. `dany --version` works without a hostname).
+	if opts.Version {
+		fmt.Printf("%s %s\n", name, version.Version)
+		return
 	}
 
 	// Setup
