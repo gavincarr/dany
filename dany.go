@@ -558,9 +558,11 @@ loop:
 	return strings.Join(resultList, ""), strings.Join(errors, "")
 }
 
-// Run a set of NXTypes dns queries on hostname, returning the number of
-// non-NXDOMAIN responses i.e. should return 0 for NX domains
-func RunNXQuery(hostname string, server string) int {
+// Run a set of NXTypes dns queries on q.Hostname, returning the number of
+// non-NXDOMAIN responses i.e. should return 0 for NX domains.
+// NX probes intentionally stay on UDP regardless of q.Udp — responses are
+// tiny and there is no benefit to TCP for this codepath.
+func RunNXQuery(q *Query) int {
 	// Do lookups, using errorStream to gather results
 	errorStream := make(chan error, len(NXTypes))
 	client := new(dns.Client)
@@ -569,7 +571,7 @@ func RunNXQuery(hostname string, server string) int {
 	// Run standard lookups
 	count := 0
 	for _, t := range NXTypes {
-		go nxlookup(errorStream, client, server, t, hostname)
+		go nxlookup(errorStream, client, q.Server, t, q.Hostname)
 		count++
 	}
 

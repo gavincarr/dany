@@ -41,7 +41,7 @@ func TestDNXDefaults(t *testing.T) {
 		go func(h string) {
 			defer func() { <-sem }()
 			server := net.JoinHostPort(resolvers.Next().String(), dnsPort)
-			responseCount := dany.RunNXQuery(h, server)
+			responseCount := dany.RunNXQuery(&dany.Query{Hostname: h, Server: server})
 			if responseCount == 0 {
 				ch <- h
 			} else {
