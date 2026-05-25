@@ -101,7 +101,7 @@ func processHostname(sem chan bool, hostname string, resolvers *dany.Resolvers) 
 	server := net.JoinHostPort(resolvers.Next().String(), dnsPort)
 
 	vprintf("looking up %s using %s\n", hostname, server)
-	responseCount := dany.RunNXQuery(hostname, server)
+	responseCount := dany.RunNXQuery(&dany.Query{Hostname: hostname, Server: server})
 	if opts.Count {
 		fmt.Printf("%s,%d\n", hostname, responseCount)
 		return
