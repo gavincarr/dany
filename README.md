@@ -53,10 +53,33 @@ TXT             globalsign-smime-dv=CDYX+XFHUw2wml6/Gb8+59BsH31KzUr6c1l2BPvqKX8=
 TXT             v=spf1 include:_spf.google.com ~all
 ```
 
+The `-w/--www` flag additionally probes the `www.<hostname>` label. By default
+only A and AAAA are queried for the www label; if `-t/--types` (or `-a/--all`)
+is given explicitly, that set is used for the www probe too. With `-T/--tag`,
+apex and www results are emitted on separate lines tagged with their
+hostname; without it, they share the same output and identical rows are
+collapsed (so a www that resolves to the same IP as the apex won't appear
+twice).
+
+```
+$ dany -w -T google.com
+google.com              A               172.217.25.110
+google.com              AAAA            2404:6800:4006:80d::200e
+google.com              MX      10      smtp.google.com.
+google.com              NS              ns1.google.com.
+google.com              NS              ns2.google.com.
+google.com              NS              ns3.google.com.
+google.com              NS              ns4.google.com.
+google.com              SOA             ns1.google.com. dns-admin.google.com.
+google.com              TXT             v=spf1 include:_spf.google.com ~all
+www.google.com          A               142.251.150.119
+www.google.com          AAAA            2404:6800:4006:80d::2004
+```
+
 Author
 ------
 
-Gavin Carr <gavin@openfusion.com.au>
+Gavin Carr <gavin@openfusion.net>
 
 
 Licence
