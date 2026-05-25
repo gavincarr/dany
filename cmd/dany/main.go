@@ -26,6 +26,7 @@ type Options struct {
 	All       bool   `short:"a" long:"all" description:"display all supported DNS records (rather than default set below)"`
 	Ptr       bool   `short:"p" long:"ptr" description:"lookup and append ptr records to ip results"`
 	Usd       bool   `short:"u" long:"usd" description:"also lookup TXT records of well-known underscore-subdomains of domain (see below)"`
+	Www       bool   `short:"w" long:"www" description:"also lookup A/AAAA records for www.<hostname>"`
 	Tag       bool   `short:"T" long:"tag" description:"tag output lines with hostname (default to true if multiple hostnames)"`
 	Resolvers string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
 	Server    string `short:"s" long:"server" description:"ip address of server to use as resolver"`
@@ -77,6 +78,7 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 	q.Udp = opts.Udp
 	q.Ptr = opts.Ptr
 	q.Usd = opts.Usd
+	q.Www = opts.Www
 	q.Tag = opts.Tag
 
 	// Parse opts.Server
@@ -115,12 +117,22 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 		return nil, nil, err
 	}
 
+	// Track whether the user made an explicit type choice (-t, -a, or
+	// the deprecated bare-types positional arg) before defaults kick in.
+	// Used below to decide whether --www should mirror that set or fall
+	// back to its address-only default.
+	typesExplicit := len(q.Types) > 0 || opts.All
+
 	if q.Types == nil || len(q.Types) == 0 {
 		if opts.All {
 			q.Types = dany.SupportedRRTypes
 		} else {
 			q.Types = dany.DefaultRRTypes
 		}
+	}
+
+	if typesExplicit {
+		q.WwwTypes = q.Types
 	}
 
 	if q.Resolvers == nil {

@@ -150,6 +150,64 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
+func TestParseOpts_WwwTypesMirroring(t *testing.T) {
+	tests := []struct {
+		name         string
+		opts         Options
+		wantTypes    []string
+		wantWwwTypes []string // nil means: expect WwwTypes == nil (fall back to library default)
+	}{
+		{
+			name:         "www without explicit types → WwwTypes nil",
+			opts:         Options{Www: true},
+			wantTypes:    dany.DefaultRRTypes,
+			wantWwwTypes: nil,
+		},
+		{
+			name:         "www without -w → WwwTypes still mirrored when types explicit",
+			opts:         Options{Types: "a,mx"},
+			wantTypes:    []string{"a", "mx"},
+			wantWwwTypes: []string{"a", "mx"}, // harmless: library ignores it when !Www
+		},
+		{
+			name:         "www + explicit -t → WwwTypes mirrors q.Types",
+			opts:         Options{Www: true, Types: "a,mx"},
+			wantTypes:    []string{"a", "mx"},
+			wantWwwTypes: []string{"a", "mx"},
+		},
+		{
+			name:         "www + -a → WwwTypes mirrors the all-types set",
+			opts:         Options{Www: true, All: true},
+			wantTypes:    dany.SupportedRRTypes,
+			wantWwwTypes: dany.SupportedRRTypes,
+		},
+		{
+			name:         "no www, no explicit types → WwwTypes nil",
+			opts:         Options{},
+			wantTypes:    dany.DefaultRRTypes,
+			wantWwwTypes: nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			q, _, err := parseOpts(tc.opts, []string{"example.com"}, true)
+			if err != nil {
+				t.Fatalf("parseOpts: %v", err)
+			}
+			if !equalStringSlices(q.Types, tc.wantTypes) {
+				t.Errorf("q.Types = %v, want %v", q.Types, tc.wantTypes)
+			}
+			if tc.wantWwwTypes == nil {
+				if q.WwwTypes != nil {
+					t.Errorf("q.WwwTypes = %v, want nil", q.WwwTypes)
+				}
+			} else if !equalStringSlices(q.WwwTypes, tc.wantWwwTypes) {
+				t.Errorf("q.WwwTypes = %v, want %v", q.WwwTypes, tc.wantWwwTypes)
+			}
+		})
+	}
+}
+
 func equalStringSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

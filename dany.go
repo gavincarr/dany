@@ -94,7 +94,13 @@ type Query struct {
 	Udp          bool
 	Ptr          bool
 	Usd          bool
-	Tag          bool
+	Www          bool
+	// WwwTypes, when non-empty, overrides the default www-probe type set
+	// (A, AAAA). Only consulted when Www is true. Callers that want the
+	// www. probe to mirror the user's explicit -t/--types selection set
+	// this; callers that want the address-only default leave it nil.
+	WwwTypes []string
+	Tag      bool
 }
 
 // Answer is a single DNS resource record returned from a typed query.
@@ -354,6 +360,8 @@ func formatTXT(rrtype string, rr *dns.TXT) string {
 // Render turns a slice of Answers into the canonical dany text output:
 // one tab-separated `\n`-terminated line per non-PTR Answer, with PTR
 // records folded into their corresponding A/AAAA lines, sorted globally.
+// Exact-duplicate lines are collapsed (relevant when --www queries surface
+// IPs the apex already returned).
 // If tagHostname is true each line is prefixed with the queried hostname
 // and a tab — useful when caller is multiplexing multiple hostnames.
 // Render does no I/O.
@@ -377,6 +385,7 @@ func Render(answers []Answer, tagHostname bool) string {
 	}
 
 	var lines []string
+	seen := make(map[string]bool)
 	for _, a := range answers {
 		line := formatAnswer(a, ptrMap)
 		if line == "" {
@@ -385,6 +394,10 @@ func Render(answers []Answer, tagHostname bool) string {
 		if tagHostname {
 			line = a.Hostname + "\t" + line
 		}
+		if seen[line] {
+			continue
+		}
+		seen[line] = true
 		lines = append(lines, line)
 	}
 	sort.Strings(lines)
@@ -425,11 +438,28 @@ func formatAnswer(a Answer, ptrMap map[string]string) string {
 	return ""
 }
 
+// defaultWwwTypes is the default set of RR types fired against the
+// www.<hostname> probe when Query.Www is set and Query.WwwTypes is empty.
+// Intentionally address-only: --www is a "what does www. point at?" probe,
+// and Render dedups identical A/AAAA lines so a matching apex IP collapses
+// into the existing row.
+var defaultWwwTypes = []string{"A", "AAAA"}
+
+// wwwTypes returns the RR types to fire against www.<q.Hostname>:
+// q.WwwTypes when set, defaultWwwTypes otherwise.
+func wwwTypes(q *Query) []string {
+	if len(q.WwwTypes) > 0 {
+		return q.WwwTypes
+	}
+	return defaultWwwTypes
+}
+
 // RunQuery fans out concurrent typed DNS lookups for q.Hostname across
-// q.Types (plus USD TXT probes if q.Usd is set, plus PTR follow-ups for
-// A/AAAA if q.Ptr is set) and returns the collected Answers and per-query
-// errors. The returned slice is unsorted; pass it through Render for the
-// canonical tab-separated text representation.
+// q.Types (plus USD TXT probes if q.Usd is set, plus A/AAAA probes against
+// www.<q.Hostname> if q.Www is set, plus PTR follow-ups for A/AAAA if q.Ptr
+// is set) and returns the collected Answers and per-query errors. The
+// returned slice is unsorted; pass it through Render for the canonical
+// tab-separated text representation.
 //
 // On wall-clock timeout (timeoutSeconds), in-flight goroutines' results
 // are silently dropped — they appear as neither Answers nor errors.
@@ -437,6 +467,9 @@ func RunQuery(q *Query) ([]Answer, []error) {
 	count := len(q.Types)
 	if q.Usd {
 		count += len(SupportedUSDs)
+	}
+	if q.Www {
+		count += len(wwwTypes(q))
 	}
 	stream := make(chan result, count)
 
@@ -454,6 +487,14 @@ func RunQuery(q *Query) ([]Answer, []error) {
 		q.IgnoreErrors = true
 		for _, usd := range SupportedUSDs {
 			go lookup(stream, client, "TXT", usd+"."+q.Hostname, q)
+		}
+	}
+	if q.Www {
+		// www probes are best-effort: a missing www.<host> shouldn't
+		// surface as an error alongside successful apex answers.
+		q.IgnoreErrors = true
+		for _, t := range wwwTypes(q) {
+			go lookup(stream, client, strings.ToUpper(t), "www."+q.Hostname, q)
 		}
 	}
 
