@@ -14,11 +14,15 @@ import (
 	"strings"
 
 	"github.com/gavincarr/dany"
+	"github.com/gavincarr/dany/internal/version"
 	flags "github.com/jessevdk/go-flags"
 	"github.com/miekg/dns"
 )
 
-const dnsPort = "53"
+const (
+	dnsPort = "53"
+	name    = "dnx"
+)
 
 // Options
 type Options struct {
@@ -29,6 +33,7 @@ type Options struct {
 	Count       bool   `short:"c" long:"count" description:"report all domains and a count of non-NXDOMAIN responses, comma-separated"`
 	Invert      bool   `short:"V" long:"invert" description:"report domains that do NOT return NXDOMAIN"`
 	Types       string `short:"t" long:"types" description:"comma-separated DNS types to probe for NX detection (default: MX,NS,SOA)"`
+	Version     bool   `          long:"version" description:"print version and exit"`
 	Args        struct {
 		Hostname  string   `description:"hostname/domain to lookup"`
 		Hostname2 []string `description:"additional hostnames/domains to lookup"`
@@ -150,6 +155,13 @@ func main() {
 			fmt.Fprintf(os.Stderr, "%s\n\n", err)
 		}
 		usage()
+	}
+
+	// --version is a short-circuit: print and exit before any further
+	// validation (so e.g. `dnx --version` works without arguments).
+	if opts.Version {
+		fmt.Printf("%s %s\n", name, version.Version)
+		return
 	}
 
 	// Setup
