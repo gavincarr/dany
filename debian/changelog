@@ -1,3 +1,30 @@
+dany (1.1.0) unstable; urgency=medium
+
+  * Logging: both CLIs switch from a bespoke vprintf/verbose-bool to
+    log/slog with github.com/lmittmann/tint, matching the standard Go
+    CLI stack. -v now counts: bare -v enables Info, -vv enables Debug;
+    default level is Warn so nothing is printed without -v. dnx's
+    per-hostname "looking up" line drops to Debug so bulk stdin runs
+    aren't flooded with one info line per host.
+
+  * Testability: extracted runCLI(opts, io.Writer) from both main()
+    functions. opts/parser are no longer package-level state, errors
+    propagate as return values instead of log.Fatal mid-flow, and the
+    renderer writes through a caller-supplied io.Writer so end-to-end
+    tests capture output into a bytes.Buffer rather than exec'ing the
+    binary. Five new offline end-to-end tests cover dany text/JSON
+    rendering + -o override and dnx NXDOMAIN/Count modes.
+
+  * Packaging: new scripts/deb_tarball.sh wraps the local source tree
+    into dist/deb/dany_<version>.tar.gz — stripped static binaries +
+    debian/ + LICENCE + README, ready for `dpkg-buildpackage -b` on a
+    build machine. Version is read from debian/changelog via
+    dpkg-parsechangelog (same single source of truth as
+    scripts/release.sh), and a fresh CGO_ENABLED=0 / -buildvcs=false
+    build is forced so the static-binary guarantees are applied.
+
+ -- Gavin Carr <gavin@profound.net>  Mon, 25 May 2026 15:53:21 +0800
+
 dany (1.0.0) unstable; urgency=medium
 
   * New flag: -w/--www. Probes the www.<hostname> label in addition to
