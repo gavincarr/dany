@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	dany "github.com/gavincarr/dany/pkg"
+	"github.com/gavincarr/dany"
 )
 
 var update = flag.Bool("update", false, "update .golden files")
