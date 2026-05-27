@@ -1,3 +1,22 @@
+dany (1.2.0) unstable; urgency=medium
+
+  * Flag parsing: both CLIs migrate from jessevdk/go-flags to
+    alecthomas/kong, bringing the project in line with the standard Go
+    CLI stack. --help output structure now follows kong's conventions
+    (Arguments / Flags sections, =STRING placeholders); the runtime
+    "Default/Supported types" footer is preserved via a kong.Help hook
+    in both CLIs. dany still accepts its two deprecated positional-arg
+    forms (@<ip> server, bare <RR>[,<RR>...] types list) with the same
+    runtime deprecation warning as before.
+
+  * Coloured --help: integrated github.com/gavincarr/kong-help-colours
+    so --help emits yellow section headers, green flag tokens, and cyan
+    placeholders when stdout is a TTY and NO_COLOR is unset. Falls back
+    to the default plain printer otherwise, so piped/non-TTY help output
+    is byte-identical.
+
+ -- Gavin Carr <gavin@openfusion.net>  Wed, 27 May 2026 12:21:28 +0800
+
 dany (1.1.0) unstable; urgency=medium
 
   * Logging: both CLIs switch from a bespoke vprintf/verbose-bool to
@@ -23,7 +42,7 @@ dany (1.1.0) unstable; urgency=medium
     scripts/release.sh), and a fresh CGO_ENABLED=0 / -buildvcs=false
     build is forced so the static-binary guarantees are applied.
 
- -- Gavin Carr <gavin@profound.net>  Mon, 25 May 2026 15:53:21 +0800
+ -- Gavin Carr <gavin@openfusion.net>  Mon, 25 May 2026 15:53:21 +0800
 
 dany (1.0.0) unstable; urgency=medium
 
@@ -74,7 +93,7 @@ dany (1.0.0) unstable; urgency=medium
     commits, and annotated-tags; the changelog is the structural gate
     (no stanza, no release).
 
- -- Gavin Carr <gavin@profound.net>  Mon, 25 May 2026 13:20:47 +0800
+ -- Gavin Carr <gavin@openfusion.net>  Mon, 25 May 2026 13:20:47 +0800
 
 dany (0.1.0) unstable; urgency=medium
 
@@ -84,4 +103,4 @@ dany (0.1.0) unstable; urgency=medium
     text/JSON/YAML output formats) and `dnx` (concurrent NXDOMAIN bulk
     prober for hostname lists).
 
- -- Gavin Carr <gavin@profound.net>  Mon, 25 May 2026 12:41:24 +0800
+ -- Gavin Carr <gavin@openfusion.net>  Mon, 25 May 2026 12:41:24 +0800
