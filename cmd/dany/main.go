@@ -13,9 +13,9 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/alecthomas/kong"
 	"github.com/gavincarr/dany"
 	"github.com/gavincarr/dany/internal/version"
-	flags "github.com/jessevdk/go-flags"
 	"github.com/lmittmann/tint"
 	"github.com/miekg/dns"
 )
@@ -32,31 +32,42 @@ var dnsPort = "53"
 
 // Options
 type Options struct {
-	Verbose   []bool `short:"v" long:"verbose" description:"verbose output (-v: info, -vv: debug)"`
-	Types     string `short:"t" long:"types" description:"comma-separated list of DNS resource types to lookup (case-insensitive)"`
-	Udp       bool   `          long:"udp" description:"make UDP dns queries instead of defaulting to TCP"`
-	All       bool   `short:"a" long:"all" description:"display all supported DNS records (rather than default set below)"`
-	Ptr       bool   `short:"p" long:"ptr" description:"lookup and append ptr records to ip results"`
-	Usd       bool   `short:"u" long:"usd" description:"also lookup TXT records of well-known underscore-subdomains of domain (see below)"`
-	Www       bool   `short:"w" long:"www" description:"also lookup A/AAAA records for www.<hostname>"`
-	Tag       bool   `short:"T" long:"tag" description:"tag output lines with hostname (default to true if multiple hostnames)"`
-	Fmt       string `short:"f" long:"fmt" choice:"text" choice:"json" choice:"yaml" choice:"yml" default:"text" description:"output format"`
-	Output    string `short:"o" long:"output" description:"write output to <path> instead of stdout (truncates; appends across multiple hostnames within one invocation)"`
-	Version   bool   `          long:"version" description:"print version and exit"`
-	Resolvers string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
-	Server    string `short:"s" long:"server" description:"ip address of server to use as resolver"`
+	Verbose   int    `short:"v" type:"counter" help:"verbose output (-v: info, -vv: debug)"`
+	Types     string `short:"t" help:"comma-separated list of DNS resource types to lookup (case-insensitive)"`
+	Udp       bool   `help:"make UDP dns queries instead of defaulting to TCP"`
+	All       bool   `short:"a" help:"display all supported DNS records (rather than default set below)"`
+	Ptr       bool   `short:"p" help:"lookup and append ptr records to ip results"`
+	Usd       bool   `short:"u" help:"also lookup TXT records of well-known underscore-subdomains of domain (see below)"`
+	Www       bool   `short:"w" help:"also lookup A/AAAA records for www.<hostname>"`
+	Tag       bool   `short:"T" help:"tag output lines with hostname (default to true if multiple hostnames)"`
+	Fmt       string `short:"f" enum:"text,json,yaml,yml" default:"text" help:"output format (one of: ${enum})"`
+	Output    string `short:"o" help:"write output to <path> instead of stdout (truncates; appends across multiple hostnames within one invocation)"`
+	Version   bool   `help:"print version and exit"`
+	Resolvers string `short:"r" name:"resolv" help:"text file of ip addresses to use as resolvers"`
+	Server    string `short:"s" help:"ip address of server to use as resolver"`
 	Args      struct {
-		Hostname  string   `description:"hostname/domain to lookup"`
-		Hostname2 []string `description:"additional hostnames/domains to lookup"`
-	} `positional-args:"yes"`
+		Hostname  string   `arg:"" optional:"" help:"hostname/domain to lookup"`
+		Hostname2 []string `arg:"" optional:"" name:"hostname2" help:"additional hostnames/domains to lookup"`
+	} `embed:""`
 }
 
-func usage(parser *flags.Parser) {
-	parser.WriteHelp(os.Stderr)
-	fmt.Fprintf(os.Stderr, "\nDefault DNS resource types: %s\n", strings.Join(dany.DefaultRRTypes, ","))
-	fmt.Fprintf(os.Stderr, "Supported DNS resource types: %s\n", strings.Join(dany.SupportedRRTypes, ","))
-	fmt.Fprintf(os.Stderr, "Supported underscore-subdomains with --usd: %s\n", strings.Join(dany.SupportedUSDs, ","))
-	os.Exit(2)
+// writeTypesFooter prints the runtime-derived list of default/supported RR
+// types and USD subdomains. Lives outside the flag struct because the lists
+// are sourced from the dany library at runtime.
+func writeTypesFooter(w io.Writer) {
+	fmt.Fprintf(w, "\nDefault DNS resource types: %s\n", strings.Join(dany.DefaultRRTypes, ","))
+	fmt.Fprintf(w, "Supported DNS resource types: %s\n", strings.Join(dany.SupportedRRTypes, ","))
+	fmt.Fprintf(w, "Supported underscore-subdomains with --usd: %s\n", strings.Join(dany.SupportedUSDs, ","))
+}
+
+// helpEpilog hooks Kong's --help path to append writeTypesFooter after the
+// standard help block.
+func helpEpilog(options kong.HelpOptions, ctx *kong.Context) error {
+	if err := kong.DefaultHelpPrinter(options, ctx); err != nil {
+		return err
+	}
+	writeTypesFooter(ctx.Stdout)
+	return nil
 }
 
 // setupLogger installs a tint-colored slog handler on stderr at a level
@@ -298,7 +309,7 @@ func openOutput(path string, defaultOut io.Writer) (io.Writer, io.Closer, error)
 // the lookups, and writes rendered output to out. -o/--output overrides
 // out; per-error stderr writes (text mode) still go to os.Stderr.
 func runCLI(opts Options, out io.Writer) error {
-	setupLogger(len(opts.Verbose))
+	setupLogger(opts.Verbose)
 	log.SetFlags(0)
 
 	args := []string{opts.Args.Hostname}
@@ -352,14 +363,17 @@ func runCLI(opts Options, out io.Writer) error {
 
 func main() {
 	var opts Options
-	// Disable flags.PrintErrors for more control
-	parser := flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
-
-	if _, err := parser.Parse(); err != nil {
-		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type != flags.ErrHelp {
-			fmt.Fprintf(os.Stderr, "%s\n\n", err)
-		}
-		usage(parser)
+	parser, err := kong.New(&opts,
+		kong.Name(name),
+		kong.Description("dany simulates DNS ANY queries by querying multiple types concurrently and aggregating the results."),
+		kong.UsageOnError(),
+		kong.Help(helpEpilog),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if _, err := parser.Parse(os.Args[1:]); err != nil {
+		parser.FatalIfErrorf(err)
 	}
 
 	// --version is a short-circuit: print and exit before any further
@@ -370,7 +384,9 @@ func main() {
 	}
 
 	if opts.Args.Hostname == "" {
-		usage(parser)
+		fmt.Fprintf(os.Stderr, "Error: hostname/domain required. Run `%s --help` for usage.\n", name)
+		writeTypesFooter(os.Stderr)
+		os.Exit(2)
 	}
 
 	if err := runCLI(opts, os.Stdout); err != nil {

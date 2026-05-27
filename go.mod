@@ -10,6 +10,7 @@ require (
 )
 
 require (
+	github.com/alecthomas/kong v1.15.0 // indirect
 	golang.org/x/mod v0.36.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
