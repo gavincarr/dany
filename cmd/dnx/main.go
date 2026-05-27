@@ -16,9 +16,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/alecthomas/kong"
 	"github.com/gavincarr/dany"
 	"github.com/gavincarr/dany/internal/version"
-	flags "github.com/jessevdk/go-flags"
 	"github.com/lmittmann/tint"
 	"github.com/miekg/dns"
 )
@@ -31,25 +31,36 @@ var dnsPort = "53"
 
 // Options
 type Options struct {
-	Verbose     []bool `short:"v" long:"verbose" description:"verbose output (-v: info, -vv: debug)"`
-	Resolvers   string `short:"r" long:"resolv" description:"text file of ip addresses to use as resolvers"`
-	Server      string `short:"s" long:"server" description:"ip address of server to use as resolver"`
-	Concurrency int    `short:"C" long:"concurrency" description:"number of hostnames to query concurrently per resolver" default:"3"`
-	Count       bool   `short:"c" long:"count" description:"report all domains and a count of non-NXDOMAIN responses, comma-separated"`
-	Invert      bool   `short:"V" long:"invert" description:"report domains that do NOT return NXDOMAIN"`
-	Types       string `short:"t" long:"types" description:"comma-separated DNS types to probe for NX detection (default: MX,NS,SOA)"`
-	Version     bool   `          long:"version" description:"print version and exit"`
+	Verbose     int    `short:"v" type:"counter" help:"verbose output (-v: info, -vv: debug)"`
+	Resolvers   string `short:"r" name:"resolv" help:"text file of ip addresses to use as resolvers"`
+	Server      string `short:"s" help:"ip address of server to use as resolver"`
+	Concurrency int    `short:"C" default:"3" help:"number of hostnames to query concurrently per resolver"`
+	Count       bool   `short:"c" help:"report all domains and a count of non-NXDOMAIN responses, comma-separated"`
+	Invert      bool   `short:"V" help:"report domains that do NOT return NXDOMAIN"`
+	Types       string `short:"t" help:"comma-separated DNS types to probe for NX detection (default: MX,NS,SOA)"`
+	Version     bool   `help:"print version and exit"`
 	Args        struct {
-		Hostname  string   `description:"hostname/domain to lookup"`
-		Hostname2 []string `description:"additional hostnames/domains to lookup"`
-	} `positional-args:"yes"`
+		Hostname  string   `arg:"" optional:"" help:"hostname/domain to lookup"`
+		Hostname2 []string `arg:"" optional:"" name:"hostname2" help:"additional hostnames/domains to lookup"`
+	} `embed:""`
 }
 
-func usage(parser *flags.Parser) {
-	parser.WriteHelp(os.Stderr)
-	fmt.Fprintf(os.Stderr, "\nDefault NX-probe types: %s\n", strings.Join(dany.NXTypes, ","))
-	fmt.Fprintf(os.Stderr, "Supported DNS resource types: %s\n", strings.Join(dany.SupportedRRTypes, ","))
-	os.Exit(2)
+// writeTypesFooter prints the runtime-derived list of NX-probe and supported
+// RR types. Lives outside the flag struct because the lists are sourced from
+// the dany library at runtime.
+func writeTypesFooter(w io.Writer) {
+	fmt.Fprintf(w, "\nDefault NX-probe types: %s\n", strings.Join(dany.NXTypes, ","))
+	fmt.Fprintf(w, "Supported DNS resource types: %s\n", strings.Join(dany.SupportedRRTypes, ","))
+}
+
+// helpEpilog hooks Kong's --help path to append writeTypesFooter after the
+// standard help block.
+func helpEpilog(options kong.HelpOptions, ctx *kong.Context) error {
+	if err := kong.DefaultHelpPrinter(options, ctx); err != nil {
+		return err
+	}
+	writeTypesFooter(ctx.Stdout)
+	return nil
 }
 
 // setupLogger installs a tint-colored slog handler on stderr at a level
@@ -142,7 +153,7 @@ func parseOpts(opts Options) (*dany.Resolvers, []string, error) {
 // across goroutines, and writes hostname lines to out. Writes from
 // goroutines are serialized so out can be a *bytes.Buffer in tests.
 func runCLI(opts Options, out io.Writer) error {
-	setupLogger(len(opts.Verbose))
+	setupLogger(opts.Verbose)
 	log.SetFlags(0)
 
 	resolvers, types, err := parseOpts(opts)
@@ -207,14 +218,17 @@ func runCLI(opts Options, out io.Writer) error {
 
 func main() {
 	var opts Options
-	// Disable flags.PrintErrors for more control
-	parser := flags.NewParser(&opts, flags.Default&^flags.PrintErrors)
-
-	if _, err := parser.Parse(); err != nil {
-		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type != flags.ErrHelp {
-			fmt.Fprintf(os.Stderr, "%s\n\n", err)
-		}
-		usage(parser)
+	parser, err := kong.New(&opts,
+		kong.Name(name),
+		kong.Description("dnx reports hostnames whose DNS lookups return NXDOMAIN for every probed type."),
+		kong.UsageOnError(),
+		kong.Help(helpEpilog),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if _, err := parser.Parse(os.Args[1:]); err != nil {
+		parser.FatalIfErrorf(err)
 	}
 
 	// --version is a short-circuit: print and exit before any further
