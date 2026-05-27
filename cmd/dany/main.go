@@ -16,6 +16,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/gavincarr/dany"
 	"github.com/gavincarr/dany/internal/version"
+	helpcolours "github.com/gavincarr/kong-help-colours"
 	"github.com/lmittmann/tint"
 	"github.com/miekg/dns"
 )
@@ -63,7 +64,7 @@ func writeTypesFooter(w io.Writer) {
 // helpEpilog hooks Kong's --help path to append writeTypesFooter after the
 // standard help block.
 func helpEpilog(options kong.HelpOptions, ctx *kong.Context) error {
-	if err := kong.DefaultHelpPrinter(options, ctx); err != nil {
+	if err := helpcolours.Help(options, ctx); err != nil {
 		return err
 	}
 	writeTypesFooter(ctx.Stdout)
