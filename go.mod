@@ -3,14 +3,13 @@ module github.com/gavincarr/dany
 go 1.25.0
 
 require (
-	github.com/jessevdk/go-flags v1.6.1
+	github.com/alecthomas/kong v1.15.0
 	github.com/lmittmann/tint v1.1.3
 	github.com/miekg/dns v1.1.72
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/alecthomas/kong v1.15.0 // indirect
 	golang.org/x/mod v0.36.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
