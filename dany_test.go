@@ -469,6 +469,24 @@ func TestRender_ExplicitCNAMEStillRenders(t *testing.T) {
 	}
 }
 
+func TestRender_USDEmpty_Untagged(t *testing.T) {
+	answers := []Answer{{Type: "TXT", Hostname: "_domainkey.example.com", Empty: true}}
+	got := Render(answers, false)
+	want := "TXT\t\t_domainkey.example.com. [present; no records]\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRender_USDEmpty_Tagged(t *testing.T) {
+	answers := []Answer{{Type: "TXT", Hostname: "_domainkey.example.com", Empty: true}}
+	got := Render(answers, true)
+	want := "_domainkey.example.com\tTXT\t\t[present; no records]\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestRunQuery_USDEmptyNonTerminal(t *testing.T) {
 	srv := testdns.New(t)
 	// _domainkey exists as an empty non-terminal (selectors live below it) —

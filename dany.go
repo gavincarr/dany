@@ -448,7 +448,7 @@ func Render(answers []Answer, tagHostname bool) string {
 	var lines []string
 	seen := make(map[string]bool)
 	for _, a := range answers {
-		line := formatAnswer(a, ptrMap)
+		line := formatAnswer(a, ptrMap, tagHostname)
 		if line == "" {
 			continue
 		}
@@ -545,7 +545,16 @@ func compareDigitRun(a, b string) int {
 // dispatching to the per-RR formatX helpers. Returns "" for Answers whose
 // Type doesn't have a registered formatter (notably PTR, which is folded
 // into A/AAAA output by Render rather than emitted as its own line).
-func formatAnswer(a Answer, ptrMap map[string]string) string {
+func formatAnswer(a Answer, ptrMap map[string]string, tagHostname bool) string {
+	// An empty non-terminal (name exists, no records of the queried type) has
+	// no RR. Show the owner name exactly once: in the value when untagged,
+	// or via the tag column Render prepends under --tag.
+	if a.Empty {
+		if tagHostname {
+			return fmt.Sprintf("%s\t\t[present; no records]\n", a.Type)
+		}
+		return fmt.Sprintf("%s\t\t%s [present; no records]\n", a.Type, dns.Fqdn(a.Hostname))
+	}
 	// A CNAME surfaced under a non-CNAME query type is a chain hop captured
 	// for the structured renderers; text folds it out, since the resolved
 	// target records it points at are already present. Explicit `-t CNAME`
