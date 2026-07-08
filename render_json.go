@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 
 	"github.com/miekg/dns"
@@ -151,8 +152,10 @@ type RRSIGData struct {
 }
 
 // BuildOutput assembles the typed Output envelope from a RunQuery result.
-// The marshaling step (json/yaml/...) is the caller's concern — see
-// RenderJSON for the canonical NDJSON wrapper.
+// Answers and Errors are sorted into a stable total order (see below) so
+// consecutive runs render identically despite RunQuery's nondeterministic
+// concurrent arrival order. The marshaling step (json/yaml/...) is the
+// caller's concern — see RenderJSON for the canonical NDJSON wrapper.
 func BuildOutput(answers []Answer, q *Query, errs []error) *Output {
 	out := &Output{
 		SchemaVersion: SchemaVersion,
@@ -179,6 +182,42 @@ func BuildOutput(answers []Answer, q *Query, errs []error) *Output {
 	for _, e := range errs {
 		out.Errors = append(out.Errors, buildError(e))
 	}
+
+	// RunQuery drains a stream of concurrent goroutines, so Answers and
+	// Errors arrive in nondeterministic order. Sort both into a stable total
+	// order so consecutive runs produce identical output. The answer key
+	// (Type, then Rdata) mirrors the text renderer, which sorts its
+	// tab-separated lines by RR type followed by the rdata columns; Name and
+	// TTL are pure tiebreakers for full determinism. Rdata is compared in
+	// natural order (see naturalCompare) so numeric fields like MX preference
+	// sort by value ("9" before "10"), not lexically.
+	sort.Slice(out.Answers, func(i, j int) bool {
+		a, b := out.Answers[i], out.Answers[j]
+		switch {
+		case a.Type != b.Type:
+			return a.Type < b.Type
+		case a.Rdata != b.Rdata:
+			return naturalCompare(a.Rdata, b.Rdata) < 0
+		case a.Name != b.Name:
+			return a.Name < b.Name
+		default:
+			return a.TTL < b.TTL
+		}
+	})
+	sort.Slice(out.Errors, func(i, j int) bool {
+		a, b := out.Errors[i], out.Errors[j]
+		switch {
+		case a.Type != b.Type:
+			return a.Type < b.Type
+		case a.Hostname != b.Hostname:
+			return a.Hostname < b.Hostname
+		case a.Code != b.Code:
+			return a.Code < b.Code
+		default:
+			return a.Message < b.Message
+		}
+	})
+
 	return out
 }
 

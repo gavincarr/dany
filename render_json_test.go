@@ -280,6 +280,191 @@ func TestBuildOutput_PTRStandalone(t *testing.T) {
 	}
 }
 
+func TestBuildOutput_DeterministicOrder(t *testing.T) {
+	// RunQuery returns Answers/Errors in nondeterministic goroutine-arrival
+	// order; BuildOutput must sort them into a stable total order so
+	// consecutive runs render identically. Feed the same records in two
+	// different input orders and assert the built envelope is identical.
+	rrs := []Answer{
+		{Type: "A", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN A 10.0.0.2")},
+		{Type: "A", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN A 10.0.0.1")},
+		{Type: "MX", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN MX 10 mx.example.com.")},
+		{Type: "NS", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN NS ns1.example.com.")},
+		{Type: "AAAA", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN AAAA 2001:db8::1")},
+	}
+	reversed := make([]Answer, len(rrs))
+	for i, a := range rrs {
+		reversed[len(rrs)-1-i] = a
+	}
+	q := &Query{Hostname: "example.com"}
+
+	got := RenderJSON(rrs, q, nil)
+	gotReversed := RenderJSON(reversed, q, nil)
+	if got != gotReversed {
+		t.Fatalf("output not order-independent:\n forward: %s\nreversed: %s", got, gotReversed)
+	}
+
+	// Verify the actual order: Type first, then Rdata. Lexically "A" < "AAAA"
+	// (prefix) < "MX" < "NS"; the two A records sort by rdata (10.0.0.1 <
+	// 10.0.0.2).
+	out := decodeJSON(t, rrs, q, nil)
+	wantOrder := []struct{ typ, rdata string }{
+		{"A", "10.0.0.1"},
+		{"A", "10.0.0.2"},
+		{"AAAA", "2001:db8::1"},
+		{"MX", "10 mx.example.com."},
+		{"NS", "ns1.example.com."},
+	}
+	if len(out.Answers) != len(wantOrder) {
+		t.Fatalf("Answers len = %d, want %d", len(out.Answers), len(wantOrder))
+	}
+	for i, w := range wantOrder {
+		if out.Answers[i].Type != w.typ || out.Answers[i].Rdata != w.rdata {
+			t.Errorf("Answers[%d] = (%s, %q), want (%s, %q)",
+				i, out.Answers[i].Type, out.Answers[i].Rdata, w.typ, w.rdata)
+		}
+	}
+}
+
+func TestBuildOutput_NaturalNumericOrder(t *testing.T) {
+	// Numeric rdata fields must sort by value, not lexically: MX preference
+	// 9 < 10 < 20 < 100 (lexical order would put "100" and "10" before "20"),
+	// and A records sort so 10.0.0.2 < 10.0.0.10.
+	rrs := []Answer{
+		{Type: "MX", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN MX 100 d.example.com.")},
+		{Type: "MX", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN MX 20 c.example.com.")},
+		{Type: "MX", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN MX 9 b.example.com.")},
+		{Type: "MX", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN MX 10 a.example.com.")},
+		{Type: "A", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN A 10.0.0.10")},
+		{Type: "A", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN A 10.0.0.2")},
+	}
+	q := &Query{Hostname: "example.com"}
+	out := decodeJSON(t, rrs, q, nil)
+
+	wantRdata := []string{
+		"10.0.0.2",
+		"10.0.0.10",
+		"9 b.example.com.",
+		"10 a.example.com.",
+		"20 c.example.com.",
+		"100 d.example.com.",
+	}
+	if len(out.Answers) != len(wantRdata) {
+		t.Fatalf("Answers len = %d, want %d", len(out.Answers), len(wantRdata))
+	}
+	for i, w := range wantRdata {
+		if out.Answers[i].Rdata != w {
+			t.Errorf("Answers[%d].Rdata = %q, want %q", i, out.Answers[i].Rdata, w)
+		}
+	}
+}
+
+func TestBuildOutput_DeterministicErrorOrder(t *testing.T) {
+	// Errors also arrive concurrently; BuildOutput must order them stably.
+	errsFwd := []error{
+		&QueryError{Type: "MX", Hostname: "example.com", Code: "NXDOMAIN", Err: ErrNXDomain},
+		&QueryError{Type: "A", Hostname: "example.com", Code: "SERVFAIL", Err: ErrServFail},
+		&QueryError{Type: "NS", Hostname: "example.com", Code: "NXDOMAIN", Err: ErrNXDomain},
+	}
+	errsRev := []error{errsFwd[2], errsFwd[1], errsFwd[0]}
+	q := &Query{Hostname: "example.com"}
+
+	if RenderJSON(nil, q, errsFwd) != RenderJSON(nil, q, errsRev) {
+		t.Fatal("error output not order-independent")
+	}
+	out := decodeJSON(t, nil, q, errsFwd)
+	wantTypes := []string{"A", "MX", "NS"} // sorted by Type
+	if len(out.Errors) != len(wantTypes) {
+		t.Fatalf("Errors len = %d, want %d", len(out.Errors), len(wantTypes))
+	}
+	for i, wt := range wantTypes {
+		if out.Errors[i].Type != wt {
+			t.Errorf("Errors[%d].Type = %q, want %q", i, out.Errors[i].Type, wt)
+		}
+	}
+}
+
+func TestBuildOutput_CNAMEChainCaptured(t *testing.T) {
+	// Querying A for a name that is a CNAME must capture the CNAME hop as its
+	// own answer (with the owner name and target) alongside the resolved A —
+	// structured output is archival, so the mapping is preserved rather than
+	// silently requeried away.
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR("www.example.com. 300 IN CNAME example.com."))
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+	q := &Query{Hostname: "www.example.com", Types: []string{"A"}, Server: srv.Addr}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	out := decodeJSON(t, answers, q, errs)
+
+	if len(out.Answers) != 2 {
+		t.Fatalf("Answers len = %d, want 2 (CNAME hop + resolved A): %+v", len(out.Answers), out.Answers)
+	}
+	var cname, a *OutputAnswer
+	for i := range out.Answers {
+		switch out.Answers[i].Type {
+		case "CNAME":
+			cname = &out.Answers[i]
+		case "A":
+			a = &out.Answers[i]
+		}
+	}
+	if cname == nil {
+		t.Fatal("no CNAME hop captured in structured output")
+	}
+	if cname.Name != "www.example.com." {
+		t.Errorf("CNAME name = %q, want www.example.com. (the queried owner)", cname.Name)
+	}
+	if cname.Rdata != "example.com." {
+		t.Errorf("CNAME rdata = %q, want example.com.", cname.Rdata)
+	}
+	if d := cname.Data.(map[string]interface{}); d["target"] != "example.com." {
+		t.Errorf("CNAME data.target = %v, want example.com.", d["target"])
+	}
+	if a == nil {
+		t.Fatal("no resolved A record in output")
+	}
+	if a.Name != "example.com." || a.Rdata != "1.2.3.4" {
+		t.Errorf("A = (name %q, rdata %q), want (example.com., 1.2.3.4)", a.Name, a.Rdata)
+	}
+}
+
+func TestBuildOutput_CNAMEMultiHopCaptured(t *testing.T) {
+	// A multi-hop chain a -> b -> A must capture both CNAME hops.
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR("a.example.com. 300 IN CNAME b.example.com."))
+	srv.Add(testdns.MustRR("b.example.com. 300 IN CNAME c.example.com."))
+	srv.Add(testdns.MustRR("c.example.com. 300 IN A 1.2.3.4"))
+	q := &Query{Hostname: "a.example.com", Types: []string{"A"}, Server: srv.Addr}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	out := decodeJSON(t, answers, q, errs)
+
+	// Reconstruct the chain by name -> target and walk it from the query name.
+	hop := make(map[string]string)
+	for _, oa := range out.Answers {
+		if oa.Type == "CNAME" {
+			hop[oa.Name] = oa.Rdata
+		}
+	}
+	want := map[string]string{
+		"a.example.com.": "b.example.com.",
+		"b.example.com.": "c.example.com.",
+	}
+	if len(hop) != len(want) {
+		t.Fatalf("captured %d CNAME hops, want %d: %+v", len(hop), len(want), out.Answers)
+	}
+	for name, target := range want {
+		if hop[name] != target {
+			t.Errorf("hop %q -> %q, want %q", name, hop[name], target)
+		}
+	}
+}
+
 func TestBuildOutput_NXDOMAINError(t *testing.T) {
 	srv := testdns.New(t)
 	q := &Query{
@@ -359,4 +544,3 @@ func TestQueryError_PreservesErrorsIs(t *testing.T) {
 		t.Errorf("QueryError.Type = %q, want A", qe.Type)
 	}
 }
-

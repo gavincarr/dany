@@ -64,8 +64,8 @@ func TestLoadResolvers(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
-		want    []string  // empty means: expect error
-		errSub  string    // substring expected in error message
+		want    []string // empty means: expect error
+		errSub  string   // substring expected in error message
 	}{
 		{
 			name:    "single IPv4",
@@ -389,5 +389,82 @@ func TestRunNXQuery_ServFail(t *testing.T) {
 	q := &Query{Hostname: "flaky.example.com", Server: srv.Addr}
 	if n := RunNXQuery(q); n != 3 {
 		t.Errorf("RunNXQuery on SERVFAIL name = %d, want 3 (SERVFAIL is not NXDOMAIN)", n)
+	}
+}
+func TestNaturalCompare(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		{"9", "10", -1},             // numeric, not lexical
+		{"10", "9", 1},              //
+		{"20", "100", -1},           //
+		{"MX\t9\t", "MX\t10\t", -1}, // full text lines
+		{"10.0.0.2", "10.0.0.10", -1},
+		{"a", "a", 0},
+		{"A", "AAAA", -1}, // shorter shared-prefix sorts first
+		{"007", "7", 1},   // equal value, more leading zeros sorts first
+		{"", "0", -1},
+	}
+	for _, tt := range tests {
+		if got := naturalCompare(tt.a, tt.b); got != tt.want {
+			t.Errorf("naturalCompare(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+		}
+		// Antisymmetry: swapping args negates the sign.
+		if got := naturalCompare(tt.b, tt.a); got != -tt.want {
+			t.Errorf("naturalCompare(%q, %q) = %d, want %d (antisymmetry)", tt.b, tt.a, got, -tt.want)
+		}
+	}
+}
+
+func TestRender_NaturalMXOrder(t *testing.T) {
+	srv := testdns.New(t)
+	for _, mx := range []string{"9 b", "10 a", "20 c", "100 d"} {
+		srv.Add(testdns.MustRR("example.com. 300 IN MX " + mx + ".example.com."))
+	}
+	q := &Query{Hostname: "example.com", Types: []string{"MX"}, Server: srv.Addr}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	want := strings.Join([]string{
+		"MX\t9\tb.example.com.\n",
+		"MX\t10\ta.example.com.\n",
+		"MX\t20\tc.example.com.\n",
+		"MX\t100\td.example.com.\n",
+	}, "")
+	if got := Render(answers, false); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestRender_CNAMEChainFoldedOut(t *testing.T) {
+	// Text cares about the end result: a CNAME chased during an A query is
+	// folded out, leaving only the resolved A line (unchanged legacy output).
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR("www.example.com. 300 IN CNAME example.com."))
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+	q := &Query{Hostname: "www.example.com", Types: []string{"A"}, Server: srv.Addr}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	if got, want := Render(answers, false), "A\t\t1.2.3.4\n"; got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestRender_ExplicitCNAMEStillRenders(t *testing.T) {
+	// An explicit `-t CNAME` query is not chased, so the CNAME must still
+	// render as text (the fold-out only applies to chased chain hops).
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR("www.example.com. 300 IN CNAME example.com."))
+	q := &Query{Hostname: "www.example.com", Types: []string{"CNAME"}, Server: srv.Addr}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	if got, want := Render(answers, false), "CNAME\t\texample.com.\n"; got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
 }

@@ -206,15 +206,21 @@ func dnsLookup(client *dns.Client, server string, msg *dns.Msg, rrtype, hostname
 			}
 			return nil, qe
 		}
-		// Handle CNAMEs
+		// Handle CNAMEs: chase the target, but preserve the CNAME hop so
+		// structured renderers can capture the mapping. The traversed CNAME
+		// is prepended to the resolved answers; the text renderer folds it
+		// out (it cares about the end result), while JSON/YAML emit it as its
+		// own record. Multi-hop chains accumulate one CNAME per level.
 		ans := resp.Answer
-		if ans != nil && len(ans) > 0 && ans[0].Header().Rrtype == dns.TypeCNAME && rrtype != "CNAME" {
-			// dig reports CNAME targets and then requeries, but that seems too noisy for N rrtypes,
-			// so just silently requery
+		if len(ans) > 0 && ans[0].Header().Rrtype == dns.TypeCNAME && rrtype != "CNAME" {
 			cname := ans[0].(*dns.CNAME)
-			//vprintf("%s %s lookup returned CNAME %q - requerying\n", hostname, rrtype, cname.Target)
 			msg.SetQuestion(dns.Fqdn(cname.Target), msg.Question[0].Qtype)
-			return dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
+			target, err := dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
+			if err != nil || target == nil {
+				return target, err
+			}
+			target.Answer = append([]dns.RR{cname}, target.Answer...)
+			return target, nil
 		}
 	}
 	return resp, nil
@@ -447,8 +453,84 @@ func Render(answers []Answer, tagHostname bool) string {
 		seen[line] = true
 		lines = append(lines, line)
 	}
-	sort.Strings(lines)
+	sort.Slice(lines, func(i, j int) bool {
+		return naturalCompare(lines[i], lines[j]) < 0
+	})
 	return strings.Join(lines, "")
+}
+
+// naturalCompare compares a and b in "natural" order: maximal runs of ASCII
+// digits are compared by numeric value rather than bytewise, so "9" orders
+// before "10" and "10.0.0.2" before "10.0.0.10". Non-digit bytes compare
+// bytewise. Returns -1, 0, or +1. Shared by the text renderer (Render) and
+// the structured renderers (BuildOutput) so numeric rdata fields — MX
+// preference, SRV priority/weight/port, etc. — sort by value, not by their
+// leading digit.
+func naturalCompare(a, b string) int {
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		ca, cb := a[i], b[j]
+		if isDigit(ca) && isDigit(cb) {
+			ie := i
+			for ie < len(a) && isDigit(a[ie]) {
+				ie++
+			}
+			je := j
+			for je < len(b) && isDigit(b[je]) {
+				je++
+			}
+			if c := compareDigitRun(a[i:ie], b[j:je]); c != 0 {
+				return c
+			}
+			i, j = ie, je
+			continue
+		}
+		if ca != cb {
+			if ca < cb {
+				return -1
+			}
+			return 1
+		}
+		i++
+		j++
+	}
+	// Shared prefix consumed; the shorter remainder sorts first.
+	switch {
+	case len(a)-i < len(b)-j:
+		return -1
+	case len(a)-i > len(b)-j:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+// compareDigitRun compares two all-digit substrings by numeric value,
+// tiebreaking equal values by raw run length (more leading zeros sort first)
+// so the result is a deterministic total order.
+func compareDigitRun(a, b string) int {
+	as, bs := strings.TrimLeft(a, "0"), strings.TrimLeft(b, "0")
+	switch {
+	case len(as) != len(bs):
+		if len(as) < len(bs) {
+			return -1
+		}
+		return 1
+	case as != bs:
+		if as < bs {
+			return -1
+		}
+		return 1
+	case len(a) != len(b):
+		if len(a) < len(b) {
+			return -1
+		}
+		return 1
+	default:
+		return 0
+	}
 }
 
 // formatAnswer renders a single Answer into one `\n`-terminated line,
@@ -456,6 +538,13 @@ func Render(answers []Answer, tagHostname bool) string {
 // Type doesn't have a registered formatter (notably PTR, which is folded
 // into A/AAAA output by Render rather than emitted as its own line).
 func formatAnswer(a Answer, ptrMap map[string]string) string {
+	// A CNAME surfaced under a non-CNAME query type is a chain hop captured
+	// for the structured renderers; text folds it out, since the resolved
+	// target records it points at are already present. Explicit `-t CNAME`
+	// queries (Type == "CNAME") still render via the case below.
+	if _, ok := a.RR.(*dns.CNAME); ok && a.Type != "CNAME" {
+		return ""
+	}
 	switch rr := a.RR.(type) {
 	case *dns.A:
 		return formatA(a.Type, rr, ptrMap)
@@ -571,7 +660,7 @@ loop:
 // Interpretation:
 //   - 0           — every probe returned NXDOMAIN; hostname is fully NX.
 //   - len(types)  — no probe returned NXDOMAIN (either real answers, other
-//                   errors, or timeouts; we can't distinguish these here).
+//     errors, or timeouts; we can't distinguish these here).
 //   - in between  — partial NXDOMAIN; treated as not-NX by callers (dnx).
 //
 // Probes that time out or error with anything other than ErrNXDomain are
