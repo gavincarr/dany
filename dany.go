@@ -542,9 +542,12 @@ func compareDigitRun(a, b string) int {
 }
 
 // formatAnswer renders a single Answer into one `\n`-terminated line,
-// dispatching to the per-RR formatX helpers. Returns "" for Answers whose
-// Type doesn't have a registered formatter (notably PTR, which is folded
-// into A/AAAA output by Render rather than emitted as its own line).
+// dispatching to the per-RR formatX helpers. An Answer with Empty == true
+// (an empty non-terminal) short-circuits before the RR-type switch and
+// returns the tag-aware "[present; no records]" marker line instead.
+// Returns "" for Answers whose Type doesn't have a registered formatter
+// (notably PTR, which is folded into A/AAAA output by Render rather than
+// emitted as its own line).
 func formatAnswer(a Answer, ptrMap map[string]string, tagHostname bool) string {
 	// An empty non-terminal (name exists, no records of the queried type) has
 	// no RR. Show the owner name exactly once: in the value when untagged,

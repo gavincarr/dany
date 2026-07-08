@@ -524,3 +524,27 @@ func TestRunQuery_USDEmptyNonTerminal(t *testing.T) {
 		t.Errorf("Empty RR = %v, want nil", e.RR)
 	}
 }
+
+func TestRunQuery_USDEmpty_RenderGolden(t *testing.T) {
+	srv := testdns.New(t)
+	srv.AddEmpty("_domainkey.example.com")
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+
+	q := &Query{Hostname: "example.com", Types: []string{"A"}, Server: srv.Addr, Usd: true}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+
+	untagged := Render(answers, false)
+	wantUntagged := "TXT\t\t_domainkey.example.com. [present; no records]\n"
+	if !strings.Contains(untagged, wantUntagged) {
+		t.Errorf("untagged Render = %q, want it to contain %q", untagged, wantUntagged)
+	}
+
+	tagged := Render(answers, true)
+	wantTagged := "_domainkey.example.com\tTXT\t\t[present; no records]\n"
+	if !strings.Contains(tagged, wantTagged) {
+		t.Errorf("tagged Render = %q, want it to contain %q", tagged, wantTagged)
+	}
+}

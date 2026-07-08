@@ -59,7 +59,7 @@ func writeTypesFooter(w io.Writer) {
 	fmt.Fprintf(w, "\nDefault DNS resource types: %s\n", strings.Join(dany.DefaultRRTypes, ","))
 	fmt.Fprintf(w, "Supported DNS resource types: %s\n", strings.Join(dany.SupportedRRTypes, ","))
 	fmt.Fprintf(w, "Supported underscore-subdomains with --usd: %s\n", strings.Join(dany.SupportedUSDs, ","))
-	fmt.Fprintf(w, "  (a name that exists without records — e.g. _domainkey when DKIM selectors are present — is reported as \"[present; no records]\")\n")
+	fmt.Fprintln(w, "  (a name that exists without records — e.g. _domainkey when DKIM selectors are present — is reported as \"[present; no records]\")")
 }
 
 // helpEpilog hooks Kong's --help path to append writeTypesFooter after the
