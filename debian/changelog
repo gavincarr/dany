@@ -1,3 +1,26 @@
+dany (1.3.0) unstable; urgency=medium
+
+  * Structured output ordering: JSON and YAML answers and errors are now
+    sorted into a stable total order (by type, then rdata, name, TTL), so
+    consecutive `-f json`/`-f yaml` runs are byte-comparable. Previously the
+    concurrent query fan-out left records in nondeterministic arrival order.
+    Text output ordering is unchanged.
+
+  * Natural numeric sorting: numeric rdata fields now sort by value rather
+    than lexically across all output formats, so MX preferences order
+    9 < 10 < 20 < 100 (not 10 < 100 < 20 < 9) and A records order
+    10.0.0.2 < 10.0.0.10. Applies to both the text renderer and the
+    JSON/YAML envelope.
+
+  * CNAME chain capture: JSON and YAML now record each CNAME hop traversed
+    while resolving a query (owner name in `name`, target in `rdata` and
+    `data.target`), so the full alias chain is reconstructable — the mapping
+    was previously discarded after being followed. Text output is unchanged
+    (the resolved target records are shown as before), and explicit
+    `-t CNAME` queries are unaffected.
+
+ -- Gavin Carr <gavin@openfusion.net>  Wed, 08 Jul 2026 13:31:19 +0800
+
 dany (1.2.0) unstable; urgency=medium
 
   * Flag parsing: both CLIs migrate from jessevdk/go-flags to
