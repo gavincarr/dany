@@ -99,26 +99,36 @@ type Answer struct {
 
 ## Text rendering
 
-`formatAnswer` (dany.go:540) gets a guard at the top, before the `RR.(type)`
-switch (which would nil-panic on a nil `RR`):
+Rendering is **tag-aware** so the owner name appears exactly once in each mode.
+`formatAnswer` gains a `tagHostname bool` parameter — its signature becomes
+`formatAnswer(a Answer, ptrMap map[string]string, tagHostname bool)` — which
+`Render` already has and passes through (all other RR cases ignore it). A guard
+at the top, before the `RR.(type)` switch (which would nil-panic on a nil `RR`):
 
 ```go
 if a.Empty {
+	if tagHostname {
+		// Name is carried by the tag column Render prepends; don't repeat it.
+		return fmt.Sprintf("%s\t\t[present; no records]\n", a.Type)
+	}
 	return fmt.Sprintf("%s\t\t%s [present; no records]\n", a.Type, dns.Fqdn(a.Hostname))
 }
 ```
 
-Non-tagged output:
+Non-tagged — the name must be in the value, since non-tag mode shows nothing
+else to identify it (and unlike a real `_dmarc` record there is no rdata value
+to go on):
 
 ```
 TXT		_domainkey.example.com. [present; no records]
 ```
 
-The owner name is included in the line because non-tag text mode does not
-otherwise show it, and unlike a real `_dmarc` record there is no rdata value to
-identify the name. In `--tag` mode the hostname prefix is added by `Render` as
-usual, so the name appears twice — acceptable, and consistent with how other
-answers behave under `--tag`.
+`--tag` — `Render` prepends the per-answer hostname as the tag column, so the
+value drops the name to avoid the redundant double:
+
+```
+_domainkey.example.com	TXT		[present; no records]
+```
 
 The line flows through `Render`'s existing dedup + natural sort unchanged (it
 is just another string line).
@@ -170,7 +180,9 @@ Decisions:
     NODATA canned response for the parent name (RcodeSuccess, no answer). Verify
     during implementation.
 - **Text golden test:** `--usd` run yields the `[present; no records]` line for
-  the empty-non-terminal name, and no line for an NXDOMAIN USD name.
+  the empty-non-terminal name, and no line for an NXDOMAIN USD name. Cover both
+  tag modes: non-tag carries the name in the value; `--tag` carries it in the
+  tag column and omits it from the value (no duplicate).
 - **Structured test:** extend the `TestBuildOutput_*` coverage with an `Empty`
   answer, asserting the `present_empty: true` OutputAnswer shape (covers JSON
   and, transitively, YAML — shared envelope).
