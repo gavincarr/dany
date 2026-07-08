@@ -468,3 +468,83 @@ func TestRender_ExplicitCNAMEStillRenders(t *testing.T) {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
 }
+
+func TestRender_USDEmpty_Untagged(t *testing.T) {
+	answers := []Answer{{Type: "TXT", Hostname: "_domainkey.example.com", Empty: true}}
+	got := Render(answers, false)
+	want := "TXT\t\t_domainkey.example.com. [present; no records]\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRender_USDEmpty_Tagged(t *testing.T) {
+	answers := []Answer{{Type: "TXT", Hostname: "_domainkey.example.com", Empty: true}}
+	got := Render(answers, true)
+	want := "_domainkey.example.com\tTXT\t\t[present; no records]\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRunQuery_USDEmptyNonTerminal(t *testing.T) {
+	srv := testdns.New(t)
+	// _domainkey exists as an empty non-terminal (selectors live below it) —
+	// the bare name returns NODATA. _dmarc carries a real TXT. _mta-sts is
+	// absent (NXDOMAIN, omitted under the USD IgnoreErrors path).
+	srv.AddEmpty("_domainkey.example.com")
+	srv.Add(testdns.MustRR(`_dmarc.example.com. 300 IN TXT "v=DMARC1; p=reject"`))
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+	// AAAA is a non-USD type and unregistered → it returns NODATA too, but
+	// must NOT produce an Empty answer (USD-only scope). Only _domainkey does.
+
+	q := &Query{Hostname: "example.com", Types: []string{"A", "AAAA"}, Server: srv.Addr, Usd: true}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+
+	var empties []Answer
+	for _, a := range answers {
+		if a.Empty {
+			empties = append(empties, a)
+		}
+	}
+	if len(empties) != 1 {
+		t.Fatalf("Empty answers = %d, want 1 (_domainkey only, not the AAAA NODATA): %+v", len(empties), answers)
+	}
+	e := empties[0]
+	if e.Hostname != "_domainkey.example.com" {
+		t.Errorf("Empty hostname = %q, want _domainkey.example.com", e.Hostname)
+	}
+	if e.Type != "TXT" {
+		t.Errorf("Empty type = %q, want TXT", e.Type)
+	}
+	if e.RR != nil {
+		t.Errorf("Empty RR = %v, want nil", e.RR)
+	}
+}
+
+func TestRunQuery_USDEmpty_RenderGolden(t *testing.T) {
+	srv := testdns.New(t)
+	srv.AddEmpty("_domainkey.example.com")
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+
+	q := &Query{Hostname: "example.com", Types: []string{"A"}, Server: srv.Addr, Usd: true}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+
+	untagged := Render(answers, false)
+	wantUntagged := "TXT\t\t_domainkey.example.com. [present; no records]\n"
+	if !strings.Contains(untagged, wantUntagged) {
+		t.Errorf("untagged Render = %q, want it to contain %q", untagged, wantUntagged)
+	}
+
+	tagged := Render(answers, true)
+	wantTagged := "_domainkey.example.com\tTXT\t\t[present; no records]\n"
+	if !strings.Contains(tagged, wantTagged) {
+		t.Errorf("tagged Render = %q, want it to contain %q", tagged, wantTagged)
+	}
+}

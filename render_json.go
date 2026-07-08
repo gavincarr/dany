@@ -44,12 +44,13 @@ type OutputOptions struct {
 // presentation form (always present); Data is the typed per-RR payload —
 // see the per-type *Data structs for shapes.
 type OutputAnswer struct {
-	Type  string      `json:"type"  yaml:"type"`
-	Name  string      `json:"name"  yaml:"name"`
-	TTL   uint32      `json:"ttl"   yaml:"ttl"`
-	Class string      `json:"class" yaml:"class"`
-	Rdata string      `json:"rdata" yaml:"rdata"`
-	Data  interface{} `json:"data"  yaml:"data"`
+	Type         string      `json:"type"          yaml:"type"`
+	Name         string      `json:"name"          yaml:"name"`
+	TTL          uint32      `json:"ttl"           yaml:"ttl"`
+	Class        string      `json:"class"         yaml:"class"`
+	Rdata        string      `json:"rdata"         yaml:"rdata"`
+	Data         interface{} `json:"data"          yaml:"data"`
+	PresentEmpty bool        `json:"present_empty,omitempty" yaml:"present_empty,omitempty"`
 }
 
 // OutputError mirrors QueryError for the envelope. Code is a stable
@@ -233,6 +234,13 @@ func RenderJSON(answers []Answer, q *Query, errs []error) string {
 }
 
 func buildAnswer(a Answer) (OutputAnswer, bool) {
+	if a.Empty {
+		return OutputAnswer{
+			Type:         a.Type,
+			Name:         dns.Fqdn(a.Hostname),
+			PresentEmpty: true,
+		}, true
+	}
 	data, ok := marshalData(a)
 	if !ok {
 		return OutputAnswer{}, false

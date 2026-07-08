@@ -114,6 +114,7 @@ type Answer struct {
 	Type     string
 	Hostname string
 	RR       dns.RR
+	Empty    bool // present-empty (NODATA); RR is nil when true
 }
 
 // result is the internal channel message used by RunQuery's goroutine
@@ -241,7 +242,7 @@ func nxlookup(errorStream chan<- error, client *dns.Client, server, rrtype, host
 // carrying the answer records as []Answer. For A/AAAA queries with q.Ptr
 // set, it also fans out PTR lookups in parallel and appends PTR-typed
 // Answers (Hostname=IP, RR=*dns.PTR) to the same slice.
-func lookup(stream chan<- result, client *dns.Client, rrtype, hostname string, q *Query) {
+func lookup(stream chan<- result, client *dns.Client, rrtype, hostname string, q *Query, usd bool) {
 	qtype, ok := dns.StringToType[rrtype]
 	if !ok {
 		stream <- result{Error: &QueryError{
@@ -270,6 +271,13 @@ func lookup(stream chan<- result, client *dns.Client, rrtype, hostname string, q
 
 	if q.Ptr && (rrtype == "A" || rrtype == "AAAA") {
 		answers = append(answers, ptrLookupAll(client, q.Server, resp.Answer)...)
+	}
+
+	// USD probes: a name that exists but returns no records (NODATA / empty
+	// non-terminal) is a positive existence signal — surface it as a
+	// record-less Answer. NXDOMAIN returns resp==nil above and is omitted.
+	if usd && len(resp.Answer) == 0 {
+		answers = append(answers, Answer{Type: rrtype, Hostname: hostname, Empty: true})
 	}
 
 	stream <- result{Answers: answers}
@@ -440,7 +448,7 @@ func Render(answers []Answer, tagHostname bool) string {
 	var lines []string
 	seen := make(map[string]bool)
 	for _, a := range answers {
-		line := formatAnswer(a, ptrMap)
+		line := formatAnswer(a, ptrMap, tagHostname)
 		if line == "" {
 			continue
 		}
@@ -534,10 +542,22 @@ func compareDigitRun(a, b string) int {
 }
 
 // formatAnswer renders a single Answer into one `\n`-terminated line,
-// dispatching to the per-RR formatX helpers. Returns "" for Answers whose
-// Type doesn't have a registered formatter (notably PTR, which is folded
-// into A/AAAA output by Render rather than emitted as its own line).
-func formatAnswer(a Answer, ptrMap map[string]string) string {
+// dispatching to the per-RR formatX helpers. An Answer with Empty == true
+// (an empty non-terminal) short-circuits before the RR-type switch and
+// returns the tag-aware "[present; no records]" marker line instead.
+// Returns "" for Answers whose Type doesn't have a registered formatter
+// (notably PTR, which is folded into A/AAAA output by Render rather than
+// emitted as its own line).
+func formatAnswer(a Answer, ptrMap map[string]string, tagHostname bool) string {
+	// An empty non-terminal (name exists, no records of the queried type) has
+	// no RR. Show the owner name exactly once: in the value when untagged,
+	// or via the tag column Render prepends under --tag.
+	if a.Empty {
+		if tagHostname {
+			return fmt.Sprintf("%s\t\t[present; no records]\n", a.Type)
+		}
+		return fmt.Sprintf("%s\t\t%s [present; no records]\n", a.Type, dns.Fqdn(a.Hostname))
+	}
 	// A CNAME surfaced under a non-CNAME query type is a chain hop captured
 	// for the structured renderers; text folds it out, since the resolved
 	// target records it points at are already present. Explicit `-t CNAME`
@@ -617,12 +637,12 @@ func RunQuery(q *Query) ([]Answer, []error) {
 	client.Timeout = timeoutSeconds / 2 * time.Second
 
 	for _, t := range q.Types {
-		go lookup(stream, client, strings.ToUpper(t), q.Hostname, q)
+		go lookup(stream, client, strings.ToUpper(t), q.Hostname, q, false)
 	}
 	if q.Usd {
 		q.IgnoreErrors = true
 		for _, usd := range SupportedUSDs {
-			go lookup(stream, client, "TXT", usd+"."+q.Hostname, q)
+			go lookup(stream, client, "TXT", usd+"."+q.Hostname, q, true)
 		}
 	}
 	if q.Www {
@@ -630,7 +650,7 @@ func RunQuery(q *Query) ([]Answer, []error) {
 		// surface as an error alongside successful apex answers.
 		q.IgnoreErrors = true
 		for _, t := range wwwTypes(q) {
-			go lookup(stream, client, strings.ToUpper(t), "www."+q.Hostname, q)
+			go lookup(stream, client, strings.ToUpper(t), "www."+q.Hostname, q, false)
 		}
 	}
 

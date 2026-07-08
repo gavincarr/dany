@@ -24,6 +24,22 @@ func decodeYAML(t *testing.T, answers []Answer, q *Query, errs []error) Output {
 	return out
 }
 
+func TestRenderYAML_USDEmptyNonTerminal(t *testing.T) {
+	answers := []Answer{{Type: "TXT", Hostname: "_domainkey.example.com", Empty: true}}
+	q := &Query{Hostname: "example.com", Types: []string{"A"}, Usd: true}
+
+	out := decodeYAML(t, answers, q, nil)
+	if len(out.Answers) != 1 {
+		t.Fatalf("Answers len = %d, want 1", len(out.Answers))
+	}
+	if !out.Answers[0].PresentEmpty {
+		t.Errorf("PresentEmpty = false, want true")
+	}
+	if out.Answers[0].Name != "_domainkey.example.com." {
+		t.Errorf("Name = %q, want _domainkey.example.com.", out.Answers[0].Name)
+	}
+}
+
 func TestRenderYAML_Envelope(t *testing.T) {
 	srv := testdns.New(t)
 	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
