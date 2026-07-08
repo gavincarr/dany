@@ -40,7 +40,7 @@ type Options struct {
 	Ptr       bool   `short:"p" help:"lookup and append ptr records to ip results"`
 	Usd       bool   `short:"u" help:"also lookup TXT records of well-known underscore-subdomains of domain (see below)"`
 	Www       bool   `short:"w" help:"also lookup A/AAAA records for www.<hostname>"`
-	Tag       bool   `short:"T" help:"tag output lines with hostname (default to true if multiple hostnames)"`
+	Tag       bool   `short:"T" help:"tag output lines with hostname (text format only; default to true if multiple hostnames)"`
 	Fmt       string `short:"f" enum:"text,json,yaml,yml" default:"text" help:"output format (one of: ${enum})"`
 	Output    string `short:"o" help:"write output to <path> instead of stdout (truncates; appends across multiple hostnames within one invocation)"`
 	Version   bool   `help:"print version and exit"`
