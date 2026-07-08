@@ -25,6 +25,43 @@ func decodeJSON(t *testing.T, answers []Answer, q *Query, errs []error) Output {
 	return out
 }
 
+func TestBuildOutput_USDEmptyNonTerminal(t *testing.T) {
+	answers := []Answer{{Type: "TXT", Hostname: "_domainkey.example.com", Empty: true}}
+	q := &Query{Hostname: "example.com", Types: []string{"A"}, Usd: true}
+
+	out := BuildOutput(answers, q, nil)
+	if len(out.Answers) != 1 {
+		t.Fatalf("Answers len = %d, want 1: %+v", len(out.Answers), out.Answers)
+	}
+	a := out.Answers[0]
+	if !a.PresentEmpty {
+		t.Errorf("PresentEmpty = false, want true")
+	}
+	if a.Type != "TXT" {
+		t.Errorf("Type = %q, want TXT", a.Type)
+	}
+	if a.Name != "_domainkey.example.com." {
+		t.Errorf("Name = %q, want _domainkey.example.com.", a.Name)
+	}
+	if a.Rdata != "" {
+		t.Errorf("Rdata = %q, want empty", a.Rdata)
+	}
+
+	// Serialized form carries the discriminator...
+	js := RenderJSON(answers, q, nil)
+	if !strings.Contains(js, `"present_empty":true`) {
+		t.Errorf("JSON missing present_empty:true: %s", js)
+	}
+	// ...but omitempty keeps it off normal record-bearing answers.
+	rec := RenderJSON([]Answer{{
+		Type: "A", Hostname: "example.com",
+		RR: testdns.MustRR("example.com. 300 IN A 1.2.3.4"),
+	}}, q, nil)
+	if strings.Contains(rec, "present_empty") {
+		t.Errorf("normal answer leaked present_empty key: %s", rec)
+	}
+}
+
 func TestRenderJSON_Envelope(t *testing.T) {
 	srv := testdns.New(t)
 	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
