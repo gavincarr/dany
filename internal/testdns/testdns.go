@@ -81,6 +81,19 @@ func (s *Server) Add(rr dns.RR) {
 	s.names[name][qtype] = append(s.names[name][qtype], rr)
 }
 
+// AddEmpty registers name as existing with no records, so every qtype returns
+// NoError + no answer (NoData) — modeling a DNS empty non-terminal (a node
+// that exists only because names below it do, e.g. _domainkey.<domain> when
+// <selector>._domainkey.<domain> records exist).
+func (s *Server) AddEmpty(name string) {
+	name = strings.ToLower(dns.Fqdn(name))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.names[name] == nil {
+		s.names[name] = make(map[uint16][]dns.RR)
+	}
+}
+
 // SetRcode forces a non-default rcode for the given name+type, overriding any
 // Add'd answers. Useful for simulating SERVFAIL, REFUSED, etc.
 func (s *Server) SetRcode(name string, qtype uint16, rcode int) {
