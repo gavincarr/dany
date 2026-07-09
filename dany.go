@@ -27,7 +27,10 @@ var NXTypes = []string{
 	"MX", "NS", "SOA",
 }
 var SupportedUSDs = []string{
-	"_dmarc", "_domainkey", "_mta-sts",
+	// Email auth/security posture (SPF lives in the apex TXT, caught by default):
+	"_dmarc", "_domainkey", "_mta-sts", "_smtp._tls", "default._bimi",
+	// Domain identity:
+	"_atproto",
 }
 
 // List of Resolver ips

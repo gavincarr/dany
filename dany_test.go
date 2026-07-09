@@ -626,6 +626,32 @@ func TestRunQuery_USDEmptyNonTerminal(t *testing.T) {
 	}
 }
 
+func TestRunQuery_USD_NewProbes(t *testing.T) {
+	// Lock in that the newer underscore labels (TLSRPT, BIMI, atproto) are
+	// actually probed: a real TXT at each must surface as an Answer under --usd.
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR(`_smtp._tls.example.com. 300 IN TXT "v=TLSRPTv1; rua=mailto:tls@example.com"`))
+	srv.Add(testdns.MustRR(`default._bimi.example.com. 300 IN TXT "v=BIMI1; l=https://example.com/logo.svg"`))
+	srv.Add(testdns.MustRR(`_atproto.example.com. 300 IN TXT "did=did:plc:abc123"`))
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+
+	q := &Query{Hostname: "example.com", Types: []string{"A"}, Server: srv.Addr, Usd: true}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+
+	got := make(map[string]bool)
+	for _, a := range answers {
+		got[a.Hostname] = true
+	}
+	for _, want := range []string{"_smtp._tls.example.com", "default._bimi.example.com", "_atproto.example.com"} {
+		if !got[want] {
+			t.Errorf("missing USD probe answer for %s; answers = %+v", want, answers)
+		}
+	}
+}
+
 func TestRunQuery_USDEmpty_RenderGolden(t *testing.T) {
 	srv := testdns.New(t)
 	srv.AddEmpty("_domainkey.example.com")
