@@ -421,6 +421,82 @@ func TestBuildOutput_DeterministicErrorOrder(t *testing.T) {
 	}
 }
 
+func TestBuildOutput_DedupsIdenticalRRsKeepsMinTTL(t *testing.T) {
+	// Two identical RRs differing only in TTL (a wire duplicate) collapse to
+	// one answer, keeping the lowest TTL.
+	q := &Query{Hostname: "example.com", Types: []string{"A"}}
+	a1 := Answer{Type: "A", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN A 1.2.3.4")}
+	a2 := Answer{Type: "A", Hostname: "example.com", RR: testdns.MustRR("example.com. 600 IN A 1.2.3.4")}
+
+	out := BuildOutput([]Answer{a2, a1}, q, nil) // higher TTL passed first
+	if len(out.Answers) != 1 {
+		t.Fatalf("Answers len = %d, want 1 (deduped): %+v", len(out.Answers), out.Answers)
+	}
+	if out.Answers[0].TTL != 300 {
+		t.Errorf("TTL = %d, want 300 (lowest of the duplicate)", out.Answers[0].TTL)
+	}
+}
+
+func TestBuildOutput_DedupKeepsNameDistinct(t *testing.T) {
+	// Same rdata, different owner names (apex vs www) are NOT duplicates.
+	q := &Query{Hostname: "example.com", Types: []string{"A"}}
+	apex := Answer{Type: "A", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN A 1.2.3.4")}
+	www := Answer{Type: "A", Hostname: "www.example.com", RR: testdns.MustRR("www.example.com. 300 IN A 1.2.3.4")}
+
+	out := BuildOutput([]Answer{apex, www}, q, nil)
+	if len(out.Answers) != 2 {
+		t.Fatalf("Answers len = %d, want 2 (distinct names kept): %+v", len(out.Answers), out.Answers)
+	}
+	var gotApex, gotWww bool
+	for _, a := range out.Answers {
+		if a.Rdata != "1.2.3.4" {
+			t.Errorf("unexpected rdata %q survived: %+v", a.Rdata, out.Answers)
+			continue
+		}
+		switch a.Name {
+		case "example.com.":
+			gotApex = true
+		case "www.example.com.":
+			gotWww = true
+		}
+	}
+	if !gotApex || !gotWww {
+		t.Errorf("expected both example.com. and www.example.com. to survive, got: %+v", out.Answers)
+	}
+}
+
+func TestBuildOutput_DedupKeepsRdataDistinct(t *testing.T) {
+	// Same name/type, different rdata (two TXT strings) are NOT duplicates.
+	q := &Query{Hostname: "example.com", Types: []string{"TXT"}}
+	t1 := Answer{Type: "TXT", Hostname: "example.com", RR: testdns.MustRR(`example.com. 300 IN TXT "a"`)}
+	t2 := Answer{Type: "TXT", Hostname: "example.com", RR: testdns.MustRR(`example.com. 300 IN TXT "b"`)}
+
+	out := BuildOutput([]Answer{t1, t2}, q, nil)
+	if len(out.Answers) != 2 {
+		t.Fatalf("Answers len = %d, want 2 (distinct rdata kept): %+v", len(out.Answers), out.Answers)
+	}
+	var gotA, gotB bool
+	for _, a := range out.Answers {
+		if a.Name != "example.com." {
+			t.Errorf("unexpected name %q survived: %+v", a.Name, out.Answers)
+			continue
+		}
+		d, ok := a.Data.(TXTData)
+		if !ok || len(d.Strings) != 1 {
+			t.Fatalf("unexpected Data shape for TXT answer: %+v", a)
+		}
+		switch d.Strings[0] {
+		case "a":
+			gotA = true
+		case "b":
+			gotB = true
+		}
+	}
+	if !gotA || !gotB {
+		t.Errorf("expected both TXT strings \"a\" and \"b\" to survive, got: %+v", out.Answers)
+	}
+}
+
 func TestBuildOutput_CNAMEChainCaptured(t *testing.T) {
 	// Querying A for a name that is a CNAME must capture the CNAME hop as its
 	// own answer (with the owner name and target) alongside the resolved A —

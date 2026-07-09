@@ -205,6 +205,27 @@ func BuildOutput(answers []Answer, q *Query, errs []error) *Output {
 			return a.TTL < b.TTL
 		}
 	})
+
+	// Dedup on RRset identity (Type, Name, Class, Rdata). An RRset is a set,
+	// so duplicate wire RRs carry no meaning (RFC 2181 §5). Runs after the
+	// sort above, so the first occurrence of each key is the lowest-TTL copy
+	// (TTL is the sort's final tiebreaker) — matching RFC 2181 §5.2's "treat
+	// as the minimum TTL". Name-distinct records (www/apex, per-IP PTRs,
+	// CNAME hops) differ in Name or Rdata and are preserved.
+	if len(out.Answers) > 1 {
+		seen := make(map[string]bool, len(out.Answers))
+		deduped := out.Answers[:0]
+		for _, a := range out.Answers {
+			key := a.Type + "\x00" + a.Name + "\x00" + a.Class + "\x00" + a.Rdata
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			deduped = append(deduped, a)
+		}
+		out.Answers = deduped
+	}
+
 	sort.Slice(out.Errors, func(i, j int) bool {
 		a, b := out.Errors[i], out.Errors[j]
 		switch {
