@@ -58,7 +58,7 @@ type Options struct {
 func writeTypesFooter(w io.Writer) {
 	fmt.Fprintf(w, "\nDefault DNS resource types: %s\n", strings.Join(dany.DefaultRRTypes, ","))
 	fmt.Fprintf(w, "Supported DNS resource types: %s\n", strings.Join(dany.SupportedRRTypes, ","))
-	fmt.Fprintf(w, "DNSSEC resource types with --dnssec: %s\n", strings.Join(dany.DNSSECRRTypes, ","))
+	fmt.Fprintf(w, "DNSSEC resource types with --dnssec: %s (RRSIG via -t only)\n", strings.Join(dany.DNSSECBundle, ","))
 	fmt.Fprintf(w, "Supported underscore-subdomains with --usd: %s\n", strings.Join(dany.SupportedUSDs, ","))
 	fmt.Fprintln(w, "  (a name that exists without records — e.g. _domainkey when DKIM selectors are present — is reported as \"[present; no records]\")")
 }
@@ -140,7 +140,8 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 		typeMap[strings.ToLower(t)] = true
 	}
 	// The DNSSEC signing records (NSEC/RRSIG) aren't in SupportedRRTypes, but
-	// remain valid for an explicit -t (and for the --dnssec bundle).
+	// remain valid for an explicit -t. This is the full renderable set, so
+	// -t RRSIG works even though --dnssec (DNSSECBundle) excludes it.
 	for _, t := range dany.DNSSECRRTypes {
 		typeMap[t] = true
 		typeMap[strings.ToLower(t)] = true
@@ -177,18 +178,20 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 		q.WwwTypes = q.Types
 	}
 
-	// --dnssec is additive: append the full DNSSEC set to whatever base set
-	// applies (default, -t, or --all), deduped. Done after WwwTypes is fixed
-	// above so www probes never inherit DNSSEC types. Builds a fresh slice so
-	// the shared DefaultRRTypes/SupportedRRTypes backing arrays are untouched.
+	// --dnssec is additive: append the DNSSEC bundle to whatever base set
+	// applies (default, -t, or --all), deduped. The bundle (DNSKEY/DS/NSEC)
+	// excludes RRSIG, which reliably SERVFAILs as a bare query — see
+	// dany.DNSSECBundle. Done after WwwTypes is fixed above so www probes
+	// never inherit DNSSEC types. Builds a fresh slice so the shared
+	// DefaultRRTypes/SupportedRRTypes backing arrays are untouched.
 	if opts.Dnssec {
-		seen := make(map[string]bool, len(q.Types)+len(dany.DNSSECRRTypes))
-		merged := make([]string, 0, len(q.Types)+len(dany.DNSSECRRTypes))
+		seen := make(map[string]bool, len(q.Types)+len(dany.DNSSECBundle))
+		merged := make([]string, 0, len(q.Types)+len(dany.DNSSECBundle))
 		for _, t := range q.Types {
 			merged = append(merged, t)
 			seen[strings.ToUpper(t)] = true
 		}
-		for _, t := range dany.DNSSECRRTypes {
+		for _, t := range dany.DNSSECBundle {
 			if !seen[t] {
 				merged = append(merged, t)
 			}

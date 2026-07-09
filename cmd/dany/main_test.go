@@ -296,25 +296,32 @@ func TestParseOpts_Dnssec(t *testing.T) {
 		wantWwwTypes []string
 	}{
 		{
-			// Additive to the default base set; no overlap → full DNSSEC set appended.
-			name:         "--dnssec alone appends full set to default",
+			// Additive to the default base set; bundle excludes RRSIG.
+			name:         "--dnssec alone appends bundle to default",
 			opts:         Options{Dnssec: true},
-			wantTypes:    concat(dany.DefaultRRTypes, "DNSKEY", "DS", "NSEC", "RRSIG"),
+			wantTypes:    concat(dany.DefaultRRTypes, "DNSKEY", "DS", "NSEC"),
 			wantWwwTypes: nil,
 		},
 		{
-			// --all already carries DNSKEY/DS → only the signing records are added.
-			name:         "-a --dnssec dedups DNSKEY/DS, adds NSEC/RRSIG",
+			// --all already carries DNSKEY/DS → only NSEC is added (RRSIG not bundled).
+			name:         "-a --dnssec dedups DNSKEY/DS, adds NSEC only",
 			opts:         Options{All: true, Dnssec: true},
-			wantTypes:    concat(dany.SupportedRRTypes, "NSEC", "RRSIG"),
+			wantTypes:    concat(dany.SupportedRRTypes, "NSEC"),
 			wantWwwTypes: dany.SupportedRRTypes, // www never inherits DNSSEC types
 		},
 		{
-			// Explicit -t seeds the set; dedup is case-insensitive.
+			// Explicit -t seeds the set; dedup is case-insensitive; no RRSIG.
 			name:         "-t dnskey --dnssec dedups case-insensitively",
 			opts:         Options{Types: "dnskey", Dnssec: true},
-			wantTypes:    []string{"dnskey", "DS", "NSEC", "RRSIG"},
+			wantTypes:    []string{"dnskey", "DS", "NSEC"},
 			wantWwwTypes: []string{"dnskey"}, // WwwTypes fixed before the dnssec append
+		},
+		{
+			// RRSIG is excluded from --dnssec but still valid via explicit -t.
+			name:         "-t RRSIG stays valid despite exclusion from the bundle",
+			opts:         Options{Types: "RRSIG"},
+			wantTypes:    []string{"RRSIG"},
+			wantWwwTypes: []string{"RRSIG"},
 		},
 	}
 	for _, tc := range tests {

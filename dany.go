@@ -24,12 +24,21 @@ var SupportedRRTypes = []string{
 	"A", "AAAA", "CAA", "CNAME", "DNSKEY", "DS", "HTTPS", "MX", "NS", "SOA", "SRV", "SVCB", "TXT",
 }
 
-// DNSSECRRTypes is the full DNSSEC record set surfaced by --dnssec. DNSKEY
-// and DS are also in SupportedRRTypes (the --all trust-chain summary); NSEC
-// and RRSIG are the opaque, high-churn signing records that --all
-// intentionally omits (they violate the low-frequency/non-opaque selection
-// rule) and are reachable only via --dnssec or an explicit -t.
+// DNSSECRRTypes is the full set of DNSSEC records dany can render, and thus
+// the set accepted for an explicit -t. DNSKEY and DS are also in
+// SupportedRRTypes (the --all trust-chain summary); NSEC and RRSIG are the
+// opaque, high-churn signing records that --all intentionally omits (they
+// violate the low-frequency/non-opaque selection rule).
 var DNSSECRRTypes = []string{"DNSKEY", "DS", "NSEC", "RRSIG"}
+
+// DNSSECBundle is the subset added by the --dnssec convenience flag. It
+// deliberately excludes RRSIG: a bare QTYPE=RRSIG query almost always
+// SERVFAILs on a recursive resolver (an RRSIG is a signature over another
+// RRset and isn't independently validatable, so validating resolvers refuse
+// the meta-query), which would add a near-guaranteed error line to every
+// --dnssec run. RRSIG stays reachable via an explicit -t RRSIG (e.g. against
+// an authoritative server, which can answer it).
+var DNSSECBundle = []string{"DNSKEY", "DS", "NSEC"}
 var NXTypes = []string{
 	"MX", "NS", "SOA",
 }
