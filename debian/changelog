@@ -1,3 +1,20 @@
+dany (1.5.0) unstable; urgency=medium
+
+  * Structured-output deduplication: `-f json`/`-f yaml` now deduplicate
+    answers on RRset identity (type, name, class, rdata), keeping the lowest
+    TTL, so genuine wire-duplicate resource records (the same RR returned
+    twice in one response — which occurs in the wild) collapse to a single
+    entry rather than appearing twice. This brings structured output in line
+    with the text renderer, which already deduplicated, and with RFC 2181 §5
+    (an RRset is a set). Name-distinct records are preserved: www/apex
+    address pairs, per-IP PTRs, and CNAME chain hops keep their separate
+    entries. A related effect: when several query types traverse the same
+    CNAME (e.g. `-t A,AAAA` against an aliased host), the shared CNAME hop is
+    now recorded once instead of once per type. The output envelope shape is
+    unchanged (schema_version stays 1).
+
+ -- Gavin Carr <gavin@openfusion.net>  Thu, 09 Jul 2026 11:39:41 +0800
+
 dany (1.4.0) unstable; urgency=medium
 
   * USD empty-non-terminal reporting: `--usd` probes now surface a name that
