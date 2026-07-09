@@ -9,7 +9,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"net"
 	"os"
@@ -155,7 +154,6 @@ func parseOpts(opts Options) (*dany.Resolvers, []string, error) {
 // goroutines are serialized so out can be a *bytes.Buffer in tests.
 func runCLI(opts Options, out io.Writer) error {
 	setupLogger(opts.Verbose)
-	log.SetFlags(0)
 
 	resolvers, types, err := parseOpts(opts)
 	if err != nil {
@@ -226,7 +224,8 @@ func main() {
 		kong.Help(helpEpilog),
 	)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error(err.Error())
+		os.Exit(1)
 	}
 	if _, err := parser.Parse(os.Args[1:]); err != nil {
 		parser.FatalIfErrorf(err)
@@ -240,6 +239,7 @@ func main() {
 	}
 
 	if err := runCLI(opts, os.Stdout); err != nil {
-		log.Fatal(err)
+		slog.Error(err.Error())
+		os.Exit(1)
 	}
 }

@@ -6,7 +6,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"net"
 	"os"
@@ -339,7 +338,6 @@ func openOutput(path string, defaultOut io.Writer) (io.Writer, io.Closer, error)
 // out; per-error stderr writes (text mode) still go to os.Stderr.
 func runCLI(opts Options, out io.Writer) error {
 	setupLogger(opts.Verbose)
-	log.SetFlags(0)
 
 	args := []string{opts.Args.Hostname}
 	if len(opts.Args.Hostname2) > 0 {
@@ -399,7 +397,8 @@ func main() {
 		kong.Help(helpEpilog),
 	)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error(err.Error())
+		os.Exit(1)
 	}
 	if _, err := parser.Parse(os.Args[1:]); err != nil {
 		parser.FatalIfErrorf(err)
@@ -419,6 +418,7 @@ func main() {
 	}
 
 	if err := runCLI(opts, os.Stdout); err != nil {
-		log.Fatal(err)
+		slog.Error(err.Error())
+		os.Exit(1)
 	}
 }
