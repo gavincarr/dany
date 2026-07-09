@@ -368,6 +368,58 @@ func TestRunQuery_StructuredDedupsWireDuplicate(t *testing.T) {
 	}
 }
 
+func TestRunQuery_StructuredDedupsCNAMEHopAcrossTypes(t *testing.T) {
+	srv := testdns.New(t)
+	// www.example.com is a CNAME to example.com, which has both A and AAAA.
+	// Querying both types independently chases the same CNAME hop twice
+	// (once per dnsLookup goroutine) — a duplicate by construction, not a
+	// wire duplicate. Structured output must still only carry it once.
+	srv.Add(testdns.MustRR("www.example.com. 300 IN CNAME example.com."))
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+	srv.Add(testdns.MustRR("example.com. 300 IN AAAA ::1"))
+
+	q := &Query{
+		Hostname: "www.example.com",
+		Types:    []string{"A", "AAAA"},
+		Server:   srv.Addr,
+	}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+
+	out := BuildOutput(answers, q, nil)
+
+	var cnames, as, aaaas []OutputAnswer
+	for _, a := range out.Answers {
+		switch a.Type {
+		case "CNAME":
+			cnames = append(cnames, a)
+		case "A":
+			as = append(as, a)
+		case "AAAA":
+			aaaas = append(aaaas, a)
+		}
+	}
+
+	if len(cnames) != 1 {
+		t.Fatalf("CNAME answers = %d, want 1 (collapsed across A and AAAA queries): %+v", len(cnames), out.Answers)
+	}
+	if cnames[0].Name != "www.example.com." {
+		t.Errorf("CNAME name = %q, want www.example.com.", cnames[0].Name)
+	}
+	if cnames[0].Rdata != "example.com." {
+		t.Errorf("CNAME rdata = %q, want example.com.", cnames[0].Rdata)
+	}
+
+	if len(as) != 1 || as[0].Rdata != "1.2.3.4" {
+		t.Errorf("A answers = %+v, want one with rdata 1.2.3.4", as)
+	}
+	if len(aaaas) != 1 || aaaas[0].Rdata != "::1" {
+		t.Errorf("AAAA answers = %+v, want one with rdata ::1", aaaas)
+	}
+}
+
 func errsContain(errs []error, substr string) bool {
 	for _, e := range errs {
 		if strings.Contains(e.Error(), substr) {

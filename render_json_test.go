@@ -447,6 +447,22 @@ func TestBuildOutput_DedupKeepsNameDistinct(t *testing.T) {
 	if len(out.Answers) != 2 {
 		t.Fatalf("Answers len = %d, want 2 (distinct names kept): %+v", len(out.Answers), out.Answers)
 	}
+	var gotApex, gotWww bool
+	for _, a := range out.Answers {
+		if a.Rdata != "1.2.3.4" {
+			t.Errorf("unexpected rdata %q survived: %+v", a.Rdata, out.Answers)
+			continue
+		}
+		switch a.Name {
+		case "example.com.":
+			gotApex = true
+		case "www.example.com.":
+			gotWww = true
+		}
+	}
+	if !gotApex || !gotWww {
+		t.Errorf("expected both example.com. and www.example.com. to survive, got: %+v", out.Answers)
+	}
 }
 
 func TestBuildOutput_DedupKeepsRdataDistinct(t *testing.T) {
@@ -458,6 +474,26 @@ func TestBuildOutput_DedupKeepsRdataDistinct(t *testing.T) {
 	out := BuildOutput([]Answer{t1, t2}, q, nil)
 	if len(out.Answers) != 2 {
 		t.Fatalf("Answers len = %d, want 2 (distinct rdata kept): %+v", len(out.Answers), out.Answers)
+	}
+	var gotA, gotB bool
+	for _, a := range out.Answers {
+		if a.Name != "example.com." {
+			t.Errorf("unexpected name %q survived: %+v", a.Name, out.Answers)
+			continue
+		}
+		d, ok := a.Data.(TXTData)
+		if !ok || len(d.Strings) != 1 {
+			t.Fatalf("unexpected Data shape for TXT answer: %+v", a)
+		}
+		switch d.Strings[0] {
+		case "a":
+			gotA = true
+		case "b":
+			gotB = true
+		}
+	}
+	if !gotA || !gotB {
+		t.Errorf("expected both TXT strings \"a\" and \"b\" to survive, got: %+v", out.Answers)
 	}
 }
 
