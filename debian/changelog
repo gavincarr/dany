@@ -1,3 +1,32 @@
+dany (1.6.0) unstable; urgency=medium
+
+  * HTTPS/SVCB record support (RFC 9460): dany now queries the modern
+    service-binding records. HTTPS (type 65) is in the default set, since it
+    lives at the bare hostname browsers query for every https:// connection;
+    SVCB (type 64), the generic prefix-anchored form, is included under
+    --all. SvcParams render non-opaquely — space-joined key=value pairs in
+    text, and an ordered params list in -f json/yaml.
+
+  * Extended --usd probes: added TLSRPT (_smtp._tls), BIMI (default._bimi),
+    and atproto (_atproto, Bluesky handle identity) to the well-known
+    underscore-label set, alongside the existing DMARC/DKIM/MTA-STS probes.
+
+  * DNSSEC records, triaged by usefulness: --all now shows the DNSKEY + DS
+    chain-of-trust summary (DS, the parent-side trust link, was previously
+    absent). A new --dnssec flag adds the DNSSEC set (DNSKEY,DS,NSEC); the
+    opaque, constantly-re-signed RRSIG is excluded from the bundle because a
+    bare RRSIG query almost always SERVFAILs on recursive resolvers, but it
+    remains reachable via an explicit -t RRSIG.
+
+  * Bug fix: both CLIs migrated off the stdlib log package to slog. Because
+    slog.SetDefault also reroutes stdlib log at Info level while the default
+    handler level is Warn, fatal errors (invalid -t type, bad --server,
+    missing resolver file) were silently swallowed — the process exited
+    non-zero with no message. Fatal paths now use slog.Error, so the error
+    is always printed.
+
+ -- Gavin Carr <gavin@openfusion.net>  Thu, 09 Jul 2026 13:23:10 +0800
+
 dany (1.5.0) unstable; urgency=medium
 
   * Structured-output deduplication: `-f json`/`-f yaml` now deduplicate
