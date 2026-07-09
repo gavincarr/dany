@@ -1,3 +1,22 @@
+dany (1.4.0) unstable; urgency=medium
+
+  * USD empty-non-terminal reporting: `--usd` probes now surface a name that
+    exists but returns no records (NOERROR/NODATA — a DNS empty non-terminal)
+    as a "present; no records" answer. The motivating case is
+    `_domainkey.<domain>`: a bare query never returns a DKIM key (keys live
+    under non-enumerable `<selector>._domainkey` names), but NODATA versus
+    NXDOMAIN distinguishes "DKIM is deployed" from "no DKIM at all" — signal
+    that was previously discarded. NXDOMAIN stays omitted, and ordinary
+    NODATA on non-USD queries is unchanged.
+
+  * Text output renders the marker as `[present; no records]`, tag-aware:
+    the owner name appears in the value when untagged, or in the tag column
+    under `--tag`. JSON and YAML gain an additive `present_empty: true`
+    discriminator on the answer (no schema-version bump); existing
+    record-bearing output is unchanged.
+
+ -- Gavin Carr <gavin@openfusion.net>  Thu, 09 Jul 2026 10:48:13 +0800
+
 dany (1.3.0) unstable; urgency=medium
 
   * Structured output ordering: JSON and YAML answers and errors are now
