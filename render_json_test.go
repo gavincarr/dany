@@ -421,6 +421,46 @@ func TestBuildOutput_DeterministicErrorOrder(t *testing.T) {
 	}
 }
 
+func TestBuildOutput_DedupsIdenticalRRsKeepsMinTTL(t *testing.T) {
+	// Two identical RRs differing only in TTL (a wire duplicate) collapse to
+	// one answer, keeping the lowest TTL.
+	q := &Query{Hostname: "example.com", Types: []string{"A"}}
+	a1 := Answer{Type: "A", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN A 1.2.3.4")}
+	a2 := Answer{Type: "A", Hostname: "example.com", RR: testdns.MustRR("example.com. 600 IN A 1.2.3.4")}
+
+	out := BuildOutput([]Answer{a2, a1}, q, nil) // higher TTL passed first
+	if len(out.Answers) != 1 {
+		t.Fatalf("Answers len = %d, want 1 (deduped): %+v", len(out.Answers), out.Answers)
+	}
+	if out.Answers[0].TTL != 300 {
+		t.Errorf("TTL = %d, want 300 (lowest of the duplicate)", out.Answers[0].TTL)
+	}
+}
+
+func TestBuildOutput_DedupKeepsNameDistinct(t *testing.T) {
+	// Same rdata, different owner names (apex vs www) are NOT duplicates.
+	q := &Query{Hostname: "example.com", Types: []string{"A"}}
+	apex := Answer{Type: "A", Hostname: "example.com", RR: testdns.MustRR("example.com. 300 IN A 1.2.3.4")}
+	www := Answer{Type: "A", Hostname: "www.example.com", RR: testdns.MustRR("www.example.com. 300 IN A 1.2.3.4")}
+
+	out := BuildOutput([]Answer{apex, www}, q, nil)
+	if len(out.Answers) != 2 {
+		t.Fatalf("Answers len = %d, want 2 (distinct names kept): %+v", len(out.Answers), out.Answers)
+	}
+}
+
+func TestBuildOutput_DedupKeepsRdataDistinct(t *testing.T) {
+	// Same name/type, different rdata (two TXT strings) are NOT duplicates.
+	q := &Query{Hostname: "example.com", Types: []string{"TXT"}}
+	t1 := Answer{Type: "TXT", Hostname: "example.com", RR: testdns.MustRR(`example.com. 300 IN TXT "a"`)}
+	t2 := Answer{Type: "TXT", Hostname: "example.com", RR: testdns.MustRR(`example.com. 300 IN TXT "b"`)}
+
+	out := BuildOutput([]Answer{t1, t2}, q, nil)
+	if len(out.Answers) != 2 {
+		t.Fatalf("Answers len = %d, want 2 (distinct rdata kept): %+v", len(out.Answers), out.Answers)
+	}
+}
+
 func TestBuildOutput_CNAMEChainCaptured(t *testing.T) {
 	// Querying A for a name that is a CNAME must capture the CNAME hop as its
 	// own answer (with the owner name and target) alongside the resolved A —

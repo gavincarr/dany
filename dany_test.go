@@ -337,6 +337,37 @@ func TestRunQuery_Www_MissingIsSilent(t *testing.T) {
 	}
 }
 
+func TestRunQuery_StructuredDedupsWireDuplicate(t *testing.T) {
+	srv := testdns.New(t)
+	// Register the same TXT twice → testdns.Add appends, so the canned
+	// response carries the record twice (a wire duplicate).
+	srv.Add(testdns.MustRR(`example.com. 300 IN TXT "v=spf1 -all"`))
+	srv.Add(testdns.MustRR(`example.com. 300 IN TXT "v=spf1 -all"`))
+
+	q := &Query{Hostname: "example.com", Types: []string{"TXT"}, Server: srv.Addr}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+
+	// Text already dedups.
+	if got := Render(answers, false); got != "TXT\t\tv=spf1 -all\n" {
+		t.Errorf("text render = %q, want single deduped line", got)
+	}
+
+	// Structured must now also dedup.
+	out := BuildOutput(answers, q, nil)
+	txt := 0
+	for _, a := range out.Answers {
+		if a.Type == "TXT" {
+			txt++
+		}
+	}
+	if txt != 1 {
+		t.Errorf("structured TXT answers = %d, want 1 (deduped): %+v", txt, out.Answers)
+	}
+}
+
 func errsContain(errs []error, substr string) bool {
 	for _, e := range errs {
 		if strings.Contains(e.Error(), substr) {
