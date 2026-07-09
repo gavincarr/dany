@@ -19,9 +19,9 @@ import (
 
 const timeoutSeconds = 10
 
-var DefaultRRTypes = []string{"A", "AAAA", "MX", "NS", "SOA", "TXT"}
+var DefaultRRTypes = []string{"A", "AAAA", "HTTPS", "MX", "NS", "SOA", "TXT"}
 var SupportedRRTypes = []string{
-	"A", "AAAA", "CAA", "CNAME", "DNSKEY", "MX", "NS", "NSEC", "RRSIG", "SOA", "SRV", "TXT",
+	"A", "AAAA", "CAA", "CNAME", "DNSKEY", "HTTPS", "MX", "NS", "NSEC", "RRSIG", "SOA", "SRV", "SVCB", "TXT",
 }
 var NXTypes = []string{
 	"MX", "NS", "SOA",
@@ -414,6 +414,18 @@ func formatSRV(rrtype string, rr *dns.SRV) string {
 	return fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Priority, rr.Weight, rr.Port, rr.Target)
 }
 
+// formatSVCB renders an SVCB/HTTPS record: priority in the numeric column,
+// then the target followed by its SvcParams (key=value, space-joined) in the
+// value column. Handles both SVCB and its HTTPS alias — callers pass the
+// embedded *dns.SVCB and the queried type name.
+func formatSVCB(rrtype string, rr *dns.SVCB) string {
+	value := rr.Target
+	for _, kv := range rr.Value {
+		value += " " + kv.Key().String() + "=" + kv.String()
+	}
+	return fmt.Sprintf("%s\t%d\t%s\n", rrtype, rr.Priority, value)
+}
+
 func formatTXT(rrtype string, rr *dns.TXT) string {
 	return fmt.Sprintf("%s\t\t%s\n", rrtype, strings.Join(rr.Txt, ""))
 }
@@ -588,6 +600,10 @@ func formatAnswer(a Answer, ptrMap map[string]string, tagHostname bool) string {
 		return formatSOA(a.Type, rr)
 	case *dns.SRV:
 		return formatSRV(a.Type, rr)
+	case *dns.HTTPS:
+		return formatSVCB(a.Type, &rr.SVCB)
+	case *dns.SVCB:
+		return formatSVCB(a.Type, rr)
 	case *dns.TXT:
 		return formatTXT(a.Type, rr)
 	}

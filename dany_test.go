@@ -521,6 +521,24 @@ func TestRender_NaturalMXOrder(t *testing.T) {
 	}
 }
 
+func TestRender_HTTPS(t *testing.T) {
+	// HTTPS/SVCB text: priority in the numeric column, then target and
+	// space-joined key=value SvcParams in the value column. Params emerge in
+	// canonical ascending-key wire order (alpn=1, port=3, ipv4hint=4) after
+	// the query's encode/decode round-trip, regardless of zone-file order.
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR(`example.com. 300 IN HTTPS 1 . alpn="h2,h3" ipv4hint=1.2.3.4 port=8443`))
+	q := &Query{Hostname: "example.com", Types: []string{"HTTPS"}, Server: srv.Addr}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	want := "HTTPS\t1\t. alpn=h2,h3 port=8443 ipv4hint=1.2.3.4\n"
+	if got := Render(answers, false); got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
 func TestRender_CNAMEChainFoldedOut(t *testing.T) {
 	// Text cares about the end result: a CNAME chased during an A query is
 	// folded out, leaving only the resolved A line (unchanged legacy output).

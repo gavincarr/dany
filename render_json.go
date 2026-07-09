@@ -128,6 +128,22 @@ type SRVData struct {
 	Target   string `json:"target"   yaml:"target"`
 }
 
+// SVCBData is the shared payload for SVCB and its HTTPS alias (RFC 9460).
+// Params is an ordered slice (not a map) to preserve the record's canonical
+// ascending-key wire order and keep output deterministic. Values are the
+// presentation form of each SvcParamValue (e.g. alpn -> "h2,h3"); the ech
+// param carries an opaque base64 ECHConfig, surfaced verbatim.
+type SVCBParam struct {
+	Key   string `json:"key"   yaml:"key"`
+	Value string `json:"value" yaml:"value"`
+}
+
+type SVCBData struct {
+	Priority uint16      `json:"priority" yaml:"priority"`
+	Target   string      `json:"target"   yaml:"target"`
+	Params   []SVCBParam `json:"params"   yaml:"params"`
+}
+
 type DNSKEYData struct {
 	Flags     uint16 `json:"flags"      yaml:"flags"`
 	Protocol  uint8  `json:"protocol"   yaml:"protocol"`
@@ -277,6 +293,17 @@ func buildAnswer(a Answer) (OutputAnswer, bool) {
 	}, true
 }
 
+// svcbData builds the shared SVCB/HTTPS payload, flattening the SvcParams
+// into an ordered key/value slice (wire order is canonical ascending-key,
+// so the result is deterministic without an explicit sort).
+func svcbData(r *dns.SVCB) SVCBData {
+	params := make([]SVCBParam, 0, len(r.Value))
+	for _, kv := range r.Value {
+		params = append(params, SVCBParam{Key: kv.Key().String(), Value: kv.String()})
+	}
+	return SVCBData{Priority: r.Priority, Target: r.Target, Params: params}
+}
+
 // marshalData returns the per-RR-type Data payload. Returns (nil, false)
 // for RR types we don't have a schema for — buildAnswer drops them so the
 // output never contains a half-described record.
@@ -315,6 +342,10 @@ func marshalData(a Answer) (interface{}, bool) {
 			Port:     r.Port,
 			Target:   r.Target,
 		}, true
+	case *dns.HTTPS:
+		return svcbData(&r.SVCB), true
+	case *dns.SVCB:
+		return svcbData(r), true
 	case *dns.DNSKEY:
 		return DNSKEYData{
 			Flags:     r.Flags,

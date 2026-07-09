@@ -247,6 +247,57 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:  "HTTPS",
+			zone:  `example.com. 300 IN HTTPS 1 . alpn="h2,h3" ipv4hint=1.2.3.4`,
+			rType: "HTTPS",
+			check: func(t *testing.T, oa OutputAnswer) {
+				d := oa.Data.(map[string]interface{})
+				if d["priority"].(float64) != 1 {
+					t.Errorf("priority = %v, want 1", d["priority"])
+				}
+				if d["target"] != "." {
+					t.Errorf("target = %v, want .", d["target"])
+				}
+				params := d["params"].([]interface{})
+				if len(params) != 2 {
+					t.Fatalf("params len = %d, want 2 (%v)", len(params), params)
+				}
+				got := map[string]string{}
+				for _, p := range params {
+					pm := p.(map[string]interface{})
+					got[pm["key"].(string)] = pm["value"].(string)
+				}
+				if got["alpn"] != "h2,h3" {
+					t.Errorf("alpn = %q, want h2,h3", got["alpn"])
+				}
+				if got["ipv4hint"] != "1.2.3.4" {
+					t.Errorf("ipv4hint = %q, want 1.2.3.4", got["ipv4hint"])
+				}
+			},
+		},
+		{
+			name:  "SVCB",
+			zone:  `_dns.example.com. 300 IN SVCB 1 dns.example.com. alpn=dot`,
+			rType: "SVCB",
+			check: func(t *testing.T, oa OutputAnswer) {
+				d := oa.Data.(map[string]interface{})
+				if d["priority"].(float64) != 1 {
+					t.Errorf("priority = %v, want 1", d["priority"])
+				}
+				if d["target"] != "dns.example.com." {
+					t.Errorf("target = %v, want dns.example.com.", d["target"])
+				}
+				params := d["params"].([]interface{})
+				if len(params) != 1 {
+					t.Fatalf("params len = %d, want 1 (%v)", len(params), params)
+				}
+				pm := params[0].(map[string]interface{})
+				if pm["key"] != "alpn" || pm["value"] != "dot" {
+					t.Errorf("param = %v, want alpn=dot", pm)
+				}
+			},
+		},
 	}
 
 	for _, tc := range tests {
