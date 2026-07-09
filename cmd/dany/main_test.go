@@ -285,6 +285,58 @@ func TestParseOpts_WwwTypesMirroring(t *testing.T) {
 	}
 }
 
+func TestParseOpts_Dnssec(t *testing.T) {
+	concat := func(base []string, extra ...string) []string {
+		return append(append([]string{}, base...), extra...)
+	}
+	tests := []struct {
+		name         string
+		opts         Options
+		wantTypes    []string
+		wantWwwTypes []string
+	}{
+		{
+			// Additive to the default base set; no overlap → full DNSSEC set appended.
+			name:         "--dnssec alone appends full set to default",
+			opts:         Options{Dnssec: true},
+			wantTypes:    concat(dany.DefaultRRTypes, "DNSKEY", "DS", "NSEC", "RRSIG"),
+			wantWwwTypes: nil,
+		},
+		{
+			// --all already carries DNSKEY/DS → only the signing records are added.
+			name:         "-a --dnssec dedups DNSKEY/DS, adds NSEC/RRSIG",
+			opts:         Options{All: true, Dnssec: true},
+			wantTypes:    concat(dany.SupportedRRTypes, "NSEC", "RRSIG"),
+			wantWwwTypes: dany.SupportedRRTypes, // www never inherits DNSSEC types
+		},
+		{
+			// Explicit -t seeds the set; dedup is case-insensitive.
+			name:         "-t dnskey --dnssec dedups case-insensitively",
+			opts:         Options{Types: "dnskey", Dnssec: true},
+			wantTypes:    []string{"dnskey", "DS", "NSEC", "RRSIG"},
+			wantWwwTypes: []string{"dnskey"}, // WwwTypes fixed before the dnssec append
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			q, _, err := parseOpts(tc.opts, []string{"example.com"}, true)
+			if err != nil {
+				t.Fatalf("parseOpts: %v", err)
+			}
+			if !equalStringSlices(q.Types, tc.wantTypes) {
+				t.Errorf("q.Types = %v, want %v", q.Types, tc.wantTypes)
+			}
+			if tc.wantWwwTypes == nil {
+				if q.WwwTypes != nil {
+					t.Errorf("q.WwwTypes = %v, want nil", q.WwwTypes)
+				}
+			} else if !equalStringSlices(q.WwwTypes, tc.wantWwwTypes) {
+				t.Errorf("q.WwwTypes = %v, want %v", q.WwwTypes, tc.wantWwwTypes)
+			}
+		})
+	}
+}
+
 func TestRunCLI_Text(t *testing.T) {
 	srv := withTestDNS(t)
 	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))

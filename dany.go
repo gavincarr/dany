@@ -21,8 +21,15 @@ const timeoutSeconds = 10
 
 var DefaultRRTypes = []string{"A", "AAAA", "HTTPS", "MX", "NS", "SOA", "TXT"}
 var SupportedRRTypes = []string{
-	"A", "AAAA", "CAA", "CNAME", "DNSKEY", "HTTPS", "MX", "NS", "NSEC", "RRSIG", "SOA", "SRV", "SVCB", "TXT",
+	"A", "AAAA", "CAA", "CNAME", "DNSKEY", "DS", "HTTPS", "MX", "NS", "SOA", "SRV", "SVCB", "TXT",
 }
+
+// DNSSECRRTypes is the full DNSSEC record set surfaced by --dnssec. DNSKEY
+// and DS are also in SupportedRRTypes (the --all trust-chain summary); NSEC
+// and RRSIG are the opaque, high-churn signing records that --all
+// intentionally omits (they violate the low-frequency/non-opaque selection
+// rule) and are reachable only via --dnssec or an explicit -t.
+var DNSSECRRTypes = []string{"DNSKEY", "DS", "NSEC", "RRSIG"}
 var NXTypes = []string{
 	"MX", "NS", "SOA",
 }
@@ -384,6 +391,13 @@ func formatDNSKEY(rrtype string, rr *dns.DNSKEY) string {
 	return fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.Flags, rr.Protocol, rr.Algorithm, rr.PublicKey)
 }
 
+// formatDS renders a Delegation Signer: key tag, algorithm and digest type
+// in the numeric column, hex digest in the value column — the parent-side
+// link in the DNSSEC chain of trust. Same column shape as formatDNSKEY.
+func formatDS(rrtype string, rr *dns.DS) string {
+	return fmt.Sprintf("%s\t%d %d %d\t%s\n", rrtype, rr.KeyTag, rr.Algorithm, rr.DigestType, rr.Digest)
+}
+
 func formatMX(rrtype string, rr *dns.MX) string {
 	return fmt.Sprintf("%s\t%d\t%s\n", rrtype, rr.Preference, rr.Mx)
 }
@@ -591,6 +605,8 @@ func formatAnswer(a Answer, ptrMap map[string]string, tagHostname bool) string {
 		return formatCNAME(a.Type, rr)
 	case *dns.DNSKEY:
 		return formatDNSKEY(a.Type, rr)
+	case *dns.DS:
+		return formatDS(a.Type, rr)
 	case *dns.MX:
 		return formatMX(a.Type, rr)
 	case *dns.NS:

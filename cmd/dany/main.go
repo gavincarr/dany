@@ -37,6 +37,7 @@ type Options struct {
 	Types     string `short:"t" help:"comma-separated list of DNS resource types to lookup (case-insensitive)"`
 	Udp       bool   `help:"make UDP dns queries instead of defaulting to TCP"`
 	All       bool   `short:"a" help:"display all supported DNS records (rather than default set below)"`
+	Dnssec    bool   `help:"also lookup the full DNSSEC record set (DNSKEY,DS,NSEC,RRSIG); --all shows only the DNSKEY/DS trust-chain summary"`
 	Ptr       bool   `short:"p" help:"lookup and append ptr records to ip results"`
 	Usd       bool   `short:"u" help:"also lookup TXT records of well-known underscore-subdomains of domain (see below)"`
 	Www       bool   `short:"w" help:"also lookup A/AAAA records for www.<hostname>"`
@@ -58,6 +59,7 @@ type Options struct {
 func writeTypesFooter(w io.Writer) {
 	fmt.Fprintf(w, "\nDefault DNS resource types: %s\n", strings.Join(dany.DefaultRRTypes, ","))
 	fmt.Fprintf(w, "Supported DNS resource types: %s\n", strings.Join(dany.SupportedRRTypes, ","))
+	fmt.Fprintf(w, "DNSSEC resource types with --dnssec: %s\n", strings.Join(dany.DNSSECRRTypes, ","))
 	fmt.Fprintf(w, "Supported underscore-subdomains with --usd: %s\n", strings.Join(dany.SupportedUSDs, ","))
 	fmt.Fprintln(w, "  (a name that exists without records — e.g. _domainkey when DKIM selectors are present — is reported as \"[present; no records]\")")
 }
@@ -138,6 +140,12 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 		typeMap[t] = true
 		typeMap[strings.ToLower(t)] = true
 	}
+	// The DNSSEC signing records (NSEC/RRSIG) aren't in SupportedRRTypes, but
+	// remain valid for an explicit -t (and for the --dnssec bundle).
+	for _, t := range dany.DNSSECRRTypes {
+		typeMap[t] = true
+		typeMap[strings.ToLower(t)] = true
+	}
 	if opts.Types != "" {
 		types := strings.Split(opts.Types, ",")
 		err := checkValidTypes(types, typeMap)
@@ -168,6 +176,25 @@ func parseOpts(opts Options, args []string, testMode bool) (*dany.Query, []strin
 
 	if typesExplicit {
 		q.WwwTypes = q.Types
+	}
+
+	// --dnssec is additive: append the full DNSSEC set to whatever base set
+	// applies (default, -t, or --all), deduped. Done after WwwTypes is fixed
+	// above so www probes never inherit DNSSEC types. Builds a fresh slice so
+	// the shared DefaultRRTypes/SupportedRRTypes backing arrays are untouched.
+	if opts.Dnssec {
+		seen := make(map[string]bool, len(q.Types)+len(dany.DNSSECRRTypes))
+		merged := make([]string, 0, len(q.Types)+len(dany.DNSSECRRTypes))
+		for _, t := range q.Types {
+			merged = append(merged, t)
+			seen[strings.ToUpper(t)] = true
+		}
+		for _, t := range dany.DNSSECRRTypes {
+			if !seen[t] {
+				merged = append(merged, t)
+			}
+		}
+		q.Types = merged
 	}
 
 	//

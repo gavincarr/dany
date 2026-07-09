@@ -151,6 +151,17 @@ type DNSKEYData struct {
 	PublicKey string `json:"public_key" yaml:"public_key"`
 }
 
+// DSData is the Delegation Signer — the parent-side link in the DNSSEC
+// chain of trust. Digest is hex; small and stable, so it (with DNSKEY) is
+// part of the --all trust-chain summary. The signing records below
+// (NSEC/RRSIG) are surfaced only under --dnssec.
+type DSData struct {
+	KeyTag     uint16 `json:"key_tag"     yaml:"key_tag"`
+	Algorithm  uint8  `json:"algorithm"   yaml:"algorithm"`
+	DigestType uint8  `json:"digest_type" yaml:"digest_type"`
+	Digest     string `json:"digest"      yaml:"digest"`
+}
+
 type NSECData struct {
 	NextDomain string   `json:"next_domain" yaml:"next_domain"`
 	Types      []string `json:"types"       yaml:"types"`
@@ -352,6 +363,13 @@ func marshalData(a Answer) (interface{}, bool) {
 			Protocol:  r.Protocol,
 			Algorithm: r.Algorithm,
 			PublicKey: r.PublicKey,
+		}, true
+	case *dns.DS:
+		return DSData{
+			KeyTag:     r.KeyTag,
+			Algorithm:  r.Algorithm,
+			DigestType: r.DigestType,
+			Digest:     r.Digest,
 		}, true
 	case *dns.NSEC:
 		types := make([]string, 0, len(r.TypeBitMap))

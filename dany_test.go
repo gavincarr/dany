@@ -539,6 +539,23 @@ func TestRender_HTTPS(t *testing.T) {
 	}
 }
 
+func TestRender_DS(t *testing.T) {
+	// DS text: key tag / algorithm / digest type in the numeric column, hex
+	// digest in the value column. (All-digit digest sidesteps hex-case
+	// normalization across the wire round-trip.)
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR(`example.com. 3600 IN DS 12345 13 2 1234567890123456789012345678901234567890123456789012345678901234`))
+	q := &Query{Hostname: "example.com", Types: []string{"DS"}, Server: srv.Addr}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	want := "DS\t12345 13 2\t1234567890123456789012345678901234567890123456789012345678901234\n"
+	if got := Render(answers, false); got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
 func TestRender_CNAMEChainFoldedOut(t *testing.T) {
 	// Text cares about the end result: a CNAME chased during an A query is
 	// folded out, leaving only the resolved A line (unchanged legacy output).

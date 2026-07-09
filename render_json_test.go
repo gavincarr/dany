@@ -298,6 +298,73 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:  "DS",
+			zone:  `example.com. 3600 IN DS 12345 13 2 1234567890123456789012345678901234567890123456789012345678901234`,
+			rType: "DS",
+			check: func(t *testing.T, oa OutputAnswer) {
+				d := oa.Data.(map[string]interface{})
+				if d["key_tag"].(float64) != 12345 {
+					t.Errorf("key_tag = %v, want 12345", d["key_tag"])
+				}
+				if d["algorithm"].(float64) != 13 {
+					t.Errorf("algorithm = %v, want 13", d["algorithm"])
+				}
+				if d["digest_type"].(float64) != 2 {
+					t.Errorf("digest_type = %v, want 2", d["digest_type"])
+				}
+				if d["digest"] != "1234567890123456789012345678901234567890123456789012345678901234" {
+					t.Errorf("digest = %v", d["digest"])
+				}
+			},
+		},
+		{
+			name:  "NSEC",
+			zone:  `example.com. 3600 IN NSEC next.example.com. A MX RRSIG NSEC`,
+			rType: "NSEC",
+			check: func(t *testing.T, oa OutputAnswer) {
+				d := oa.Data.(map[string]interface{})
+				if d["next_domain"] != "next.example.com." {
+					t.Errorf("next_domain = %v", d["next_domain"])
+				}
+				types := d["types"].([]interface{})
+				want := map[string]bool{"A": true, "MX": true, "RRSIG": true, "NSEC": true}
+				if len(types) != len(want) {
+					t.Fatalf("types = %v, want %v", types, want)
+				}
+				for _, ty := range types {
+					if !want[ty.(string)] {
+						t.Errorf("unexpected type %v in %v", ty, types)
+					}
+				}
+			},
+		},
+		{
+			name:  "RRSIG",
+			zone:  `example.com. 3600 IN RRSIG A 13 2 3600 20250101000000 20240101000000 12345 example.com. aGVsbG8=`,
+			rType: "RRSIG",
+			check: func(t *testing.T, oa OutputAnswer) {
+				d := oa.Data.(map[string]interface{})
+				if d["type_covered"] != "A" {
+					t.Errorf("type_covered = %v, want A", d["type_covered"])
+				}
+				if d["algorithm"].(float64) != 13 {
+					t.Errorf("algorithm = %v, want 13", d["algorithm"])
+				}
+				if d["key_tag"].(float64) != 12345 {
+					t.Errorf("key_tag = %v, want 12345", d["key_tag"])
+				}
+				if d["signer_name"] != "example.com." {
+					t.Errorf("signer_name = %v", d["signer_name"])
+				}
+				if d["expiration"] != "20250101000000" {
+					t.Errorf("expiration = %v, want 20250101000000", d["expiration"])
+				}
+				if d["inception"] != "20240101000000" {
+					t.Errorf("inception = %v, want 20240101000000", d["inception"])
+				}
+			},
+		},
 	}
 
 	for _, tc := range tests {
