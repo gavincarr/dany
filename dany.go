@@ -12,6 +12,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -54,6 +55,7 @@ type Resolvers struct {
 	List   []net.IP
 	Length int
 	Index  int
+	mu     sync.Mutex // guards Index across concurrent Next() callers
 }
 
 // NewResolvers builds a Resolvers set from one or more IPs, which Next()
@@ -114,18 +116,24 @@ func (r *Resolvers) Append(ip net.IP) {
 	r.Length = len(r.List)
 }
 
+// Next returns the next resolver IP round-robin. It is safe to call
+// concurrently from multiple goroutines sharing one *Resolvers (dnx does,
+// and RunQuery does via resolveServer): the Index read-modify-write is
+// guarded by a mutex. The single-resolver fast path stays lock-free — Length
+// and List[0] are fixed after construction.
 func (r *Resolvers) Next() net.IP {
 	if r.Length == 1 {
 		return r.List[0]
-	} else {
-		resolverIP := r.List[r.Index]
-		if r.Index >= r.Length-1 {
-			r.Index = 0
-		} else {
-			r.Index++
-		}
-		return resolverIP
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	resolverIP := r.List[r.Index]
+	if r.Index >= r.Length-1 {
+		r.Index = 0
+	} else {
+		r.Index++
+	}
+	return resolverIP
 }
 
 // dany Query - lookup Types for Hostname using Server
@@ -308,7 +316,7 @@ func nxlookup(errorStream chan<- error, client *dns.Client, server, rrtype, host
 // carrying the answer records as []Answer. For A/AAAA queries with q.Ptr
 // set, it also fans out PTR lookups in parallel and appends PTR-typed
 // Answers (Hostname=IP, RR=*dns.PTR) to the same slice.
-func lookup(stream chan<- result, client *dns.Client, server, rrtype, hostname string, q *Query, usd bool) {
+func lookup(stream chan<- result, client *dns.Client, server, rrtype, hostname string, q *Query, usd, ignoreErrors bool) {
 	qtype, ok := dns.StringToType[rrtype]
 	if !ok {
 		stream <- result{Error: &QueryError{
@@ -324,7 +332,7 @@ func lookup(stream chan<- result, client *dns.Client, server, rrtype, hostname s
 	msg.RecursionDesired = true
 	msg.SetQuestion(dns.Fqdn(hostname), qtype)
 
-	resp, err := dnsLookup(client, server, msg, rrtype, hostname, q.IgnoreErrors)
+	resp, err := dnsLookup(client, server, msg, rrtype, hostname, ignoreErrors)
 	if err != nil || resp == nil {
 		stream <- result{Error: err}
 		return
@@ -731,21 +739,31 @@ func RunQuery(q *Query) ([]Answer, []error) {
 	// hostname hits the same server (matching the CLI's per-hostname choice).
 	server := resolveServer(q)
 
+	// Snapshot the caller's error-suppression setting once, before launching
+	// any goroutine. The best-effort USD/www probes opt into suppression via
+	// their own per-call argument rather than mutating the shared *Query —
+	// mutating it mid-flight both raced with the apex reads and leaked
+	// suppression onto the apex queries, silently swallowing real SERVFAIL/
+	// REFUSED rcodes.
+	ignoreErrors := q.IgnoreErrors
+
 	for _, t := range q.Types {
-		go lookup(stream, client, server, strings.ToUpper(t), q.Hostname, q, false)
+		go lookup(stream, client, server, strings.ToUpper(t), q.Hostname, q, false, ignoreErrors)
 	}
 	if q.Usd {
-		q.IgnoreErrors = true
+		// USD probes are existence checks: a probe that errors shouldn't fail
+		// the whole query, so suppress their errors regardless of the caller's
+		// setting.
 		for _, usd := range SupportedUSDs {
-			go lookup(stream, client, server, "TXT", usd+"."+q.Hostname, q, true)
+			go lookup(stream, client, server, "TXT", usd+"."+q.Hostname, q, true, true)
 		}
 	}
 	if q.Www {
-		// www probes are best-effort: a missing www.<host> shouldn't
-		// surface as an error alongside successful apex answers.
-		q.IgnoreErrors = true
+		// www probes are best-effort: a missing www.<host> shouldn't surface
+		// as an error alongside successful apex answers (usd=false here, so
+		// suppression is a distinct argument from the empty-record signal).
 		for _, t := range wwwTypes(q) {
-			go lookup(stream, client, server, strings.ToUpper(t), "www."+q.Hostname, q, false)
+			go lookup(stream, client, server, strings.ToUpper(t), "www."+q.Hostname, q, false, true)
 		}
 	}
 

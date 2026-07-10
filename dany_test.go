@@ -1,10 +1,12 @@
 package dany
 
 import (
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gavincarr/dany/internal/testdns"
@@ -279,6 +281,70 @@ func TestRunQuery_ServerWinsOverResolvers(t *testing.T) {
 	if got := Render(answers, false); got != "A\t\t1.2.3.4\n" {
 		t.Errorf("got %q, want A record from Server", got)
 	}
+}
+
+// TestRunQuery_ApexErrorSurvivesBestEffortProbe pins that enabling a
+// best-effort probe (Www here; Usd is the same code path) does NOT suppress
+// errors on the apex query types. RunQuery previously flipped the shared
+// q.IgnoreErrors true so the probes wouldn't fail the query — but the apex
+// lookups read the same field, so a real apex SERVFAIL silently vanished
+// (and that write raced with the apex reads, caught under -race).
+func TestRunQuery_ApexErrorSurvivesBestEffortProbe(t *testing.T) {
+	srv := testdns.New(t)
+	srv.SetRcode("example.com", dns.TypeA, dns.RcodeServerFailure)
+	// www.example.com is unregistered → NXDOMAIN; as a best-effort probe it
+	// must stay silent and not add an error of its own.
+
+	q := &Query{
+		Hostname: "example.com",
+		Types:    []string{"A"},
+		Server:   srv.Addr,
+		Www:      true,
+	}
+	answers, errs := RunQuery(q)
+	if len(answers) != 0 {
+		t.Errorf("expected no answers, got %v", answers)
+	}
+
+	var apexErr *QueryError
+	for _, e := range errs {
+		var qe *QueryError
+		if errors.As(e, &qe) && qe.Type == "A" && qe.Hostname == "example.com" {
+			apexErr = qe
+		}
+	}
+	if apexErr == nil {
+		t.Fatalf("apex A SERVFAIL was suppressed by the www probe; errs=%v", errs)
+	}
+	if apexErr.Code != "SERVFAIL" {
+		t.Errorf("apex error code = %q, want SERVFAIL", apexErr.Code)
+	}
+}
+
+// TestResolvers_NextConcurrent exercises Next() from many goroutines on one
+// shared *Resolvers — the pattern dnx uses and that RunQuery now triggers via
+// resolveServer. Run under -race to catch unsynchronized Index access; it also
+// guards against an out-of-range index panic from the read-modify-write.
+func TestResolvers_NextConcurrent(t *testing.T) {
+	r, err := NewResolversFromStrings([]string{"1.1.1.1", "8.8.8.8", "9.9.9.9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const goroutines, iters = 8, 500
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				if ip := r.Next(); ip == nil {
+					t.Error("Next() returned nil")
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestRunQuery_NXDomain(t *testing.T) {
