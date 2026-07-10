@@ -12,7 +12,7 @@ Usage
     dany [<types>] <hostname>
 
 where `<types>` is a comma-separated list of DNS record types to query.
-If unspecified, the default `types` list is: `SOA,NS,A,AAAA,MX,TXT`.
+If unspecified, the default `types` list is: `A,AAAA,HTTPS,MX,NS,SOA,TXT`.
 
 In the output, fields are separated by tabs, so you can use `cut` (with no
 delimiter) to extract individual fields.
@@ -124,6 +124,118 @@ answers:
       exchange: mx.example.com.
 errors: []
 ```
+
+dnx
+---
+
+`dnx` is a companion CLI that reads one or more hostnames (as arguments or on
+stdin) and reports those that return `NXDOMAIN`. For safety it probes multiple
+record types concurrently (`MX,NS,SOA` by default) and only reports a hostname
+as NXDOMAIN if *every* type returns NXDOMAIN — a host that answers any one type
+is not reported.
+
+    dnx <hostname> [<hostname> ...]
+    dnx < hostnames.txt
+
+Examples:
+
+```
+# Report which of these domains don't exist
+$ dnx example.com does-not-exist.example nxdomain.test
+does-not-exist.example
+nxdomain.test
+
+# Feed a list on stdin
+$ cat domains.txt | dnx
+...
+
+# -c/--count: report every hostname with its count of non-NXDOMAIN responses
+$ dnx -c example.com does-not-exist.example
+example.com,3
+does-not-exist.example,0
+
+# -V/--invert: report the hostnames that DO resolve (not NXDOMAIN)
+$ dnx -V example.com does-not-exist.example
+example.com
+```
+
+Useful flags:
+
+- `-s/--server <ip>` — use a single resolver IP (overrides the system resolvers).
+- `-r/--resolv <file>` — load resolver IPs from a file (one per line); queries
+  rotate round-robin across them.
+- `-t/--types <list>` — override the NX-probe types (default `MX,NS,SOA`).
+- `-C/--concurrency <n>` — hostnames queried concurrently per resolver (default
+  `3`; the effective cap is `n × number-of-resolvers`).
+- `-c/--count`, `-V/--invert` — as shown above.
+- `--version` — print version and exit.
+
+Using dany as a library
+-----------------------
+
+Both CLIs are thin wrappers over the `dany` package, which you can import
+directly:
+
+    go get github.com/gavincarr/dany
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/gavincarr/dany"
+)
+
+func main() {
+	// Build a resolver set (round-robins across all of them per query).
+	resolvers, err := dany.NewResolversFromStrings([]string{"1.1.1.1", "8.8.8.8"})
+	if err != nil {
+		panic(err)
+	}
+
+	q := &dany.Query{
+		Hostname:  "example.com",
+		Types:     dany.DefaultRRTypes, // or e.g. []string{"A", "MX", "TXT"}
+		Resolvers: resolvers,
+	}
+
+	answers, errs := dany.RunQuery(q)
+	for _, e := range errs {
+		fmt.Println("error:", e) // *dany.QueryError; errors.Is(e, dany.ErrNXDomain) works
+	}
+
+	fmt.Print(dany.Render(answers, false)) // canonical tab-separated text
+	// ...or structured, sharing one typed envelope:
+	//   dany.RenderJSON(answers, q, errs)
+	//   dany.RenderYAML(answers, q, errs)
+}
+```
+
+Key API surface:
+
+- **Query functions.** `RunQuery(q *Query) ([]Answer, []error)` does the
+  typed-ANY aggregation; `RunNXQuery(q *Query) int` powers `dnx` (returns the
+  number of non-NXDOMAIN responses, so `0` means every probe type was
+  NXDOMAIN).
+- **Renderers.** `Render(answers, tagHostname)` produces the tab-separated
+  text; `RenderJSON` / `RenderYAML` produce the structured formats. All three
+  consume the same `[]Answer` — the query path does no formatting and the
+  renderers do no I/O, so you can also consume `[]Answer` directly and skip
+  them.
+- **Resolvers.** `NewResolvers(ips ...net.IP)` builds a round-robin set from
+  one or more parsed IPs (panics if given none); `NewResolversFromStrings([]string)`
+  parses and validates IP strings, returning an error instead; `LoadResolvers(file)`
+  reads them from a file. Append more with `(*Resolvers).Append`.
+- **Errors are structured.** Each is a `*QueryError` carrying a stable `Code`
+  (`NXDOMAIN`, `SERVFAIL`, `EXCHANGE_ERROR`, `UNSUPPORTED_TYPE`, …) and
+  supports `errors.Is` against `ErrNXDomain` / `ErrServFail`.
+- **Type constants.** `DefaultRRTypes`, `SupportedRRTypes`, `DNSSECRRTypes`,
+  `DNSSECBundle`, `NXTypes`, and `SupportedUSDs` expose the same type sets the
+  CLIs use.
+
+Note that `Answer.RR` is a `github.com/miekg/dns` RR, so inspecting records
+directly couples you to that package (going through the renderers does not).
 
 Author
 ------
