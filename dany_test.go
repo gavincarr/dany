@@ -50,6 +50,31 @@ func TestNewResolversNoArgsPanics(t *testing.T) {
 	NewResolvers()
 }
 
+func TestNewResolversFromStrings(t *testing.T) {
+	r, err := NewResolversFromStrings([]string{"1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.Length != 4 {
+		t.Fatalf("Length = %d, want 4", r.Length)
+	}
+	want := []string{"1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4"}
+	for i, w := range want {
+		if r.List[i].String() != w {
+			t.Errorf("List[%d] = %s, want %s", i, r.List[i], w)
+		}
+	}
+}
+
+func TestNewResolversFromStringsErrors(t *testing.T) {
+	if _, err := NewResolversFromStrings(nil); err == nil {
+		t.Error("empty input: expected error, got nil")
+	}
+	if _, err := NewResolversFromStrings([]string{"1.1.1.1", "not-an-ip"}); err == nil {
+		t.Error("bad ip: expected error, got nil")
+	}
+}
+
 func TestResolversAppend(t *testing.T) {
 	r := NewResolvers(net.ParseIP("8.8.8.8"))
 	r.Append(net.ParseIP("1.1.1.1"))

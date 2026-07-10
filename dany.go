@@ -68,28 +68,45 @@ func NewResolvers(ips ...net.IP) *Resolvers {
 	return &Resolvers{List: ips, Length: len(ips)}
 }
 
+// NewResolversFromStrings builds a Resolvers set by parsing each string as
+// an IP address. Unlike NewResolvers it returns an error rather than
+// panicking, since it typically parses dynamic input (config/flags/env):
+// it errors on the first unparseable entry, or if ips is empty.
+func NewResolversFromStrings(ips []string) (*Resolvers, error) {
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("Error: no resolver IPs given")
+	}
+	parsed := make([]net.IP, 0, len(ips))
+	for _, s := range ips {
+		ip := net.ParseIP(s)
+		if ip == nil {
+			return nil, fmt.Errorf("Error: failed to parse resolver ip address %q", s)
+		}
+		parsed = append(parsed, ip)
+	}
+	return &Resolvers{List: parsed, Length: len(parsed)}, nil
+}
+
 func LoadResolvers(filename string) (*Resolvers, error) {
 	fh, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
-	var resolvers []net.IP
+	defer fh.Close()
+	var lines []string
 	scanner := bufio.NewScanner(fh)
 	for scanner.Scan() {
-		ipText := scanner.Text()
-		ip := net.ParseIP(ipText)
-		if ip == nil {
-			err := fmt.Errorf("Error: failed to parse --resolv ip address %q", ipText)
-			return nil, err
-		}
-		resolvers = append(resolvers, ip)
+		lines = append(lines, scanner.Text())
 	}
-	// Must have at least one resolver
-	if len(resolvers) == 0 {
-		err := fmt.Errorf("Error: no resolvers found in --resolv file %q", filename)
+	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	return &Resolvers{List: resolvers, Length: len(resolvers)}, nil
+	// Keep the file-specific empty message (more helpful than the generic
+	// one) before delegating the per-line IP parsing.
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("Error: no resolvers found in --resolv file %q", filename)
+	}
+	return NewResolversFromStrings(lines)
 }
 
 func (r *Resolvers) Append(ip net.IP) {
