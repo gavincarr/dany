@@ -56,8 +56,16 @@ type Resolvers struct {
 	Index  int
 }
 
-func NewResolvers(ip net.IP) *Resolvers {
-	return &Resolvers{List: []net.IP{ip}, Length: 1}
+// NewResolvers builds a Resolvers set from one or more IPs, which Next()
+// then rotates through round-robin. Called with a single IP it behaves as
+// before; pass several (or spread a slice with ips...) to load-balance
+// queries across resolvers. It panics if called with no IPs, since an
+// empty set has no resolver for Next() to return.
+func NewResolvers(ips ...net.IP) *Resolvers {
+	if len(ips) == 0 {
+		panic("dany.NewResolvers: at least one resolver IP required")
+	}
+	return &Resolvers{List: ips, Length: len(ips)}
 }
 
 func LoadResolvers(filename string) (*Resolvers, error) {

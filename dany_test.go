@@ -22,6 +22,34 @@ func TestNewResolvers(t *testing.T) {
 	}
 }
 
+func TestNewResolversVariadic(t *testing.T) {
+	ips := []net.IP{
+		net.ParseIP("1.1.1.1"),
+		net.ParseIP("1.0.0.1"),
+		net.ParseIP("8.8.8.8"),
+		net.ParseIP("8.8.4.4"),
+	}
+	r := NewResolvers(ips...)
+	if r.Length != 4 {
+		t.Fatalf("Length = %d, want 4", r.Length)
+	}
+	want := []string{"1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4"}
+	for i, w := range want {
+		if r.List[i].String() != w {
+			t.Errorf("List[%d] = %s, want %s", i, r.List[i], w)
+		}
+	}
+}
+
+func TestNewResolversNoArgsPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("NewResolvers() with no args did not panic")
+		}
+	}()
+	NewResolvers()
+}
+
 func TestResolversAppend(t *testing.T) {
 	r := NewResolvers(net.ParseIP("8.8.8.8"))
 	r.Append(net.ParseIP("1.1.1.1"))
