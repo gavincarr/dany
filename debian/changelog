@@ -1,3 +1,28 @@
+dany (1.8.0) unstable; urgency=medium
+
+  * Library fix: RunQuery/RunNXQuery now honour Query.Resolvers. Previously
+    they dialled Query.Server only and never consulted Resolvers, so a
+    library caller that set Resolvers alone — exactly as the README example
+    shows — dialled the empty string and got a "missing address" error for
+    every type. The Resolvers→server bridge (round-robin pick + default DNS
+    port) is now done inside the library; an explicit Server still wins, so
+    the CLIs are unchanged.
+
+  * Concurrency fixes surfaced by library use:
+    - Error suppression is now a per-lookup argument. RunQuery used to flip
+      the shared Query.IgnoreErrors true for the best-effort USD/www probes;
+      the apex-type goroutines read the same field, so the write both raced
+      with their reads and leaked suppression onto the apex queries —
+      silently swallowing real SERVFAIL/REFUSED rcodes. Apex errors now
+      surface again while USD/www stay best-effort.
+    - Resolvers.Next() is now concurrency-safe. Its Index read-modify-write
+      was unlocked, yet dnx (and now RunQuery) call it from concurrent
+      goroutines on a shared *Resolvers; under -race this raced and could
+      panic with an out-of-range index. It is now mutex-guarded, with the
+      single-resolver fast path kept lock-free.
+
+ -- Gavin Carr <gavin@openfusion.net>  Fri, 10 Jul 2026 15:44:29 +0800
+
 dany (1.7.0) unstable; urgency=medium
 
   * Library ergonomics: NewResolvers is now variadic, so a round-robin
