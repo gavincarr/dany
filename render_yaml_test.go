@@ -61,14 +61,14 @@ func TestRenderYAML_Envelope(t *testing.T) {
 	if len(out.Answers) != 1 || out.Answers[0].Type != "A" {
 		t.Fatalf("Answers = %+v, want one A record", out.Answers)
 	}
-	// yaml.v3 unmarshals the typed Data payload into map[string]interface{}
-	// the same way encoding/json does, so we can do the same assertion.
-	d, ok := out.Answers[0].Data.(map[string]interface{})
+	// The custom UnmarshalYAML restores the typed Data payload (an AData),
+	// just as UnmarshalJSON does for the JSON envelope.
+	d, ok := out.Answers[0].Data.(AData)
 	if !ok {
-		t.Fatalf("Data not an object: %T", out.Answers[0].Data)
+		t.Fatalf("Data not AData: %T", out.Answers[0].Data)
 	}
-	if d["address"] != "1.2.3.4" {
-		t.Errorf("data.address = %v, want 1.2.3.4", d["address"])
+	if d.Address != "1.2.3.4" {
+		t.Errorf("data.address = %v, want 1.2.3.4", d.Address)
 	}
 }
 

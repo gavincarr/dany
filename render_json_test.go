@@ -101,7 +101,10 @@ func TestRenderJSON_Envelope(t *testing.T) {
 func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 	// Drive a canned Answer for each RR type through BuildOutput and assert
 	// the typed Data payload matches what the per-type *Data struct
-	// promises. Catches accidental field renames / type drift.
+	// promises. Catches accidental field renames / type drift. The Data
+	// values are the concrete *Data structs (marshalData's output); the
+	// custom unmarshalers restore the same shapes on the way back in, which
+	// TestOutputAnswer_RoundTrip verifies separately.
 	tests := []struct {
 		name  string
 		zone  string
@@ -113,12 +116,12 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  "example.com. 300 IN A 1.2.3.4",
 			rType: "A",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d, ok := oa.Data.(map[string]interface{})
+				d, ok := oa.Data.(AData)
 				if !ok {
-					t.Fatalf("Data not an object: %T", oa.Data)
+					t.Fatalf("Data not AData: %T", oa.Data)
 				}
-				if d["address"] != "1.2.3.4" {
-					t.Errorf("address = %v, want 1.2.3.4", d["address"])
+				if d.Address != "1.2.3.4" {
+					t.Errorf("address = %v, want 1.2.3.4", d.Address)
 				}
 				if oa.Rdata != "1.2.3.4" {
 					t.Errorf("Rdata = %q, want 1.2.3.4", oa.Rdata)
@@ -130,9 +133,9 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  "example.com. 300 IN AAAA 2001:db8::1",
 			rType: "AAAA",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["address"] != "2001:db8::1" {
-					t.Errorf("address = %v, want 2001:db8::1", d["address"])
+				d := oa.Data.(AAAAData)
+				if d.Address != "2001:db8::1" {
+					t.Errorf("address = %v, want 2001:db8::1", d.Address)
 				}
 			},
 		},
@@ -141,12 +144,12 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  "example.com. 300 IN MX 10 mx1.example.com.",
 			rType: "MX",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["preference"].(float64) != 10 {
-					t.Errorf("preference = %v, want 10", d["preference"])
+				d := oa.Data.(MXData)
+				if d.Preference != 10 {
+					t.Errorf("preference = %v, want 10", d.Preference)
 				}
-				if d["exchange"] != "mx1.example.com." {
-					t.Errorf("exchange = %v, want mx1.example.com.", d["exchange"])
+				if d.Exchange != "mx1.example.com." {
+					t.Errorf("exchange = %v, want mx1.example.com.", d.Exchange)
 				}
 			},
 		},
@@ -155,18 +158,18 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  "example.com. 3600 IN SOA ns.example.com. hostmaster.example.com. 12345 7200 3600 1209600 300",
 			rType: "SOA",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["mname"] != "ns.example.com." {
-					t.Errorf("mname = %v", d["mname"])
+				d := oa.Data.(SOAData)
+				if d.MName != "ns.example.com." {
+					t.Errorf("mname = %v", d.MName)
 				}
-				if d["rname"] != "hostmaster.example.com." {
-					t.Errorf("rname = %v", d["rname"])
+				if d.RName != "hostmaster.example.com." {
+					t.Errorf("rname = %v", d.RName)
 				}
-				if d["serial"].(float64) != 12345 {
-					t.Errorf("serial = %v, want 12345", d["serial"])
+				if d.Serial != 12345 {
+					t.Errorf("serial = %v, want 12345", d.Serial)
 				}
-				if d["minimum"].(float64) != 300 {
-					t.Errorf("minimum = %v, want 300", d["minimum"])
+				if d.Minimum != 300 {
+					t.Errorf("minimum = %v, want 300", d.Minimum)
 				}
 			},
 		},
@@ -175,15 +178,14 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  `example.com. 60 IN TXT "v=spf1" "include:_spf.google.com" "~all"`,
 			rType: "TXT",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				strs := d["strings"].([]interface{})
+				d := oa.Data.(TXTData)
 				want := []string{"v=spf1", "include:_spf.google.com", "~all"}
-				if len(strs) != len(want) {
-					t.Fatalf("strings len = %d, want %d (%v)", len(strs), len(want), strs)
+				if len(d.Strings) != len(want) {
+					t.Fatalf("strings len = %d, want %d (%v)", len(d.Strings), len(want), d.Strings)
 				}
 				for i, w := range want {
-					if strs[i] != w {
-						t.Errorf("strings[%d] = %v, want %q", i, strs[i], w)
+					if d.Strings[i] != w {
+						t.Errorf("strings[%d] = %v, want %q", i, d.Strings[i], w)
 					}
 				}
 			},
@@ -193,9 +195,9 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  "example.com. 86400 IN NS ns1.example.com.",
 			rType: "NS",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["target"] != "ns1.example.com." {
-					t.Errorf("target = %v", d["target"])
+				d := oa.Data.(NSData)
+				if d.Target != "ns1.example.com." {
+					t.Errorf("target = %v", d.Target)
 				}
 			},
 		},
@@ -204,9 +206,9 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  "alias.example.com. 300 IN CNAME target.example.com.",
 			rType: "CNAME",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["target"] != "target.example.com." {
-					t.Errorf("target = %v", d["target"])
+				d := oa.Data.(CNAMEData)
+				if d.Target != "target.example.com." {
+					t.Errorf("target = %v", d.Target)
 				}
 			},
 		},
@@ -215,15 +217,15 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  `example.com. 300 IN CAA 0 issue "letsencrypt.org"`,
 			rType: "CAA",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["flag"].(float64) != 0 {
-					t.Errorf("flag = %v", d["flag"])
+				d := oa.Data.(CAAData)
+				if d.Flag != 0 {
+					t.Errorf("flag = %v", d.Flag)
 				}
-				if d["tag"] != "issue" {
-					t.Errorf("tag = %v", d["tag"])
+				if d.Tag != "issue" {
+					t.Errorf("tag = %v", d.Tag)
 				}
-				if d["value"] != "letsencrypt.org" {
-					t.Errorf("value = %v", d["value"])
+				if d.Value != "letsencrypt.org" {
+					t.Errorf("value = %v", d.Value)
 				}
 			},
 		},
@@ -232,18 +234,18 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  "_sip._tcp.example.com. 300 IN SRV 10 60 5060 sipserver.example.com.",
 			rType: "SRV",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["priority"].(float64) != 10 {
-					t.Errorf("priority = %v", d["priority"])
+				d := oa.Data.(SRVData)
+				if d.Priority != 10 {
+					t.Errorf("priority = %v", d.Priority)
 				}
-				if d["weight"].(float64) != 60 {
-					t.Errorf("weight = %v", d["weight"])
+				if d.Weight != 60 {
+					t.Errorf("weight = %v", d.Weight)
 				}
-				if d["port"].(float64) != 5060 {
-					t.Errorf("port = %v", d["port"])
+				if d.Port != 5060 {
+					t.Errorf("port = %v", d.Port)
 				}
-				if d["target"] != "sipserver.example.com." {
-					t.Errorf("target = %v", d["target"])
+				if d.Target != "sipserver.example.com." {
+					t.Errorf("target = %v", d.Target)
 				}
 			},
 		},
@@ -252,21 +254,19 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  `example.com. 300 IN HTTPS 1 . alpn="h2,h3" ipv4hint=1.2.3.4`,
 			rType: "HTTPS",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["priority"].(float64) != 1 {
-					t.Errorf("priority = %v, want 1", d["priority"])
+				d := oa.Data.(SVCBData)
+				if d.Priority != 1 {
+					t.Errorf("priority = %v, want 1", d.Priority)
 				}
-				if d["target"] != "." {
-					t.Errorf("target = %v, want .", d["target"])
+				if d.Target != "." {
+					t.Errorf("target = %v, want .", d.Target)
 				}
-				params := d["params"].([]interface{})
-				if len(params) != 2 {
-					t.Fatalf("params len = %d, want 2 (%v)", len(params), params)
+				if len(d.Params) != 2 {
+					t.Fatalf("params len = %d, want 2 (%v)", len(d.Params), d.Params)
 				}
 				got := map[string]string{}
-				for _, p := range params {
-					pm := p.(map[string]interface{})
-					got[pm["key"].(string)] = pm["value"].(string)
+				for _, p := range d.Params {
+					got[p.Key] = p.Value
 				}
 				if got["alpn"] != "h2,h3" {
 					t.Errorf("alpn = %q, want h2,h3", got["alpn"])
@@ -281,20 +281,18 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  `_dns.example.com. 300 IN SVCB 1 dns.example.com. alpn=dot`,
 			rType: "SVCB",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["priority"].(float64) != 1 {
-					t.Errorf("priority = %v, want 1", d["priority"])
+				d := oa.Data.(SVCBData)
+				if d.Priority != 1 {
+					t.Errorf("priority = %v, want 1", d.Priority)
 				}
-				if d["target"] != "dns.example.com." {
-					t.Errorf("target = %v, want dns.example.com.", d["target"])
+				if d.Target != "dns.example.com." {
+					t.Errorf("target = %v, want dns.example.com.", d.Target)
 				}
-				params := d["params"].([]interface{})
-				if len(params) != 1 {
-					t.Fatalf("params len = %d, want 1 (%v)", len(params), params)
+				if len(d.Params) != 1 {
+					t.Fatalf("params len = %d, want 1 (%v)", len(d.Params), d.Params)
 				}
-				pm := params[0].(map[string]interface{})
-				if pm["key"] != "alpn" || pm["value"] != "dot" {
-					t.Errorf("param = %v, want alpn=dot", pm)
+				if d.Params[0].Key != "alpn" || d.Params[0].Value != "dot" {
+					t.Errorf("param = %v, want alpn=dot", d.Params[0])
 				}
 			},
 		},
@@ -303,18 +301,18 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  `example.com. 3600 IN DS 12345 13 2 1234567890123456789012345678901234567890123456789012345678901234`,
 			rType: "DS",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["key_tag"].(float64) != 12345 {
-					t.Errorf("key_tag = %v, want 12345", d["key_tag"])
+				d := oa.Data.(DSData)
+				if d.KeyTag != 12345 {
+					t.Errorf("key_tag = %v, want 12345", d.KeyTag)
 				}
-				if d["algorithm"].(float64) != 13 {
-					t.Errorf("algorithm = %v, want 13", d["algorithm"])
+				if d.Algorithm != 13 {
+					t.Errorf("algorithm = %v, want 13", d.Algorithm)
 				}
-				if d["digest_type"].(float64) != 2 {
-					t.Errorf("digest_type = %v, want 2", d["digest_type"])
+				if d.DigestType != 2 {
+					t.Errorf("digest_type = %v, want 2", d.DigestType)
 				}
-				if d["digest"] != "1234567890123456789012345678901234567890123456789012345678901234" {
-					t.Errorf("digest = %v", d["digest"])
+				if d.Digest != "1234567890123456789012345678901234567890123456789012345678901234" {
+					t.Errorf("digest = %v", d.Digest)
 				}
 			},
 		},
@@ -323,18 +321,17 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  `example.com. 3600 IN NSEC next.example.com. A MX RRSIG NSEC`,
 			rType: "NSEC",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["next_domain"] != "next.example.com." {
-					t.Errorf("next_domain = %v", d["next_domain"])
+				d := oa.Data.(NSECData)
+				if d.NextDomain != "next.example.com." {
+					t.Errorf("next_domain = %v", d.NextDomain)
 				}
-				types := d["types"].([]interface{})
 				want := map[string]bool{"A": true, "MX": true, "RRSIG": true, "NSEC": true}
-				if len(types) != len(want) {
-					t.Fatalf("types = %v, want %v", types, want)
+				if len(d.Types) != len(want) {
+					t.Fatalf("types = %v, want %v", d.Types, want)
 				}
-				for _, ty := range types {
-					if !want[ty.(string)] {
-						t.Errorf("unexpected type %v in %v", ty, types)
+				for _, ty := range d.Types {
+					if !want[ty] {
+						t.Errorf("unexpected type %v in %v", ty, d.Types)
 					}
 				}
 			},
@@ -344,24 +341,24 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			zone:  `example.com. 3600 IN RRSIG A 13 2 3600 20250101000000 20240101000000 12345 example.com. aGVsbG8=`,
 			rType: "RRSIG",
 			check: func(t *testing.T, oa OutputAnswer) {
-				d := oa.Data.(map[string]interface{})
-				if d["type_covered"] != "A" {
-					t.Errorf("type_covered = %v, want A", d["type_covered"])
+				d := oa.Data.(RRSIGData)
+				if d.TypeCovered != "A" {
+					t.Errorf("type_covered = %v, want A", d.TypeCovered)
 				}
-				if d["algorithm"].(float64) != 13 {
-					t.Errorf("algorithm = %v, want 13", d["algorithm"])
+				if d.Algorithm != 13 {
+					t.Errorf("algorithm = %v, want 13", d.Algorithm)
 				}
-				if d["key_tag"].(float64) != 12345 {
-					t.Errorf("key_tag = %v, want 12345", d["key_tag"])
+				if d.KeyTag != 12345 {
+					t.Errorf("key_tag = %v, want 12345", d.KeyTag)
 				}
-				if d["signer_name"] != "example.com." {
-					t.Errorf("signer_name = %v", d["signer_name"])
+				if d.SignerName != "example.com." {
+					t.Errorf("signer_name = %v", d.SignerName)
 				}
-				if d["expiration"] != "20250101000000" {
-					t.Errorf("expiration = %v, want 20250101000000", d["expiration"])
+				if d.Expiration != "20250101000000" {
+					t.Errorf("expiration = %v, want 20250101000000", d.Expiration)
 				}
-				if d["inception"] != "20240101000000" {
-					t.Errorf("inception = %v, want 20240101000000", d["inception"])
+				if d.Inception != "20240101000000" {
+					t.Errorf("inception = %v, want 20240101000000", d.Inception)
 				}
 			},
 		},
@@ -386,17 +383,7 @@ func TestBuildOutput_RRTypeDataShapes(t *testing.T) {
 			if oa.Rdata == "" {
 				t.Errorf("Rdata empty, want non-empty (presentation form)")
 			}
-			// Round-trip through JSON so map[string]interface{} assertions
-			// in tc.check work as if the consumer parsed the wire form.
-			b, err := json.Marshal(oa)
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
-			var roundtripped OutputAnswer
-			if err := json.Unmarshal(b, &roundtripped); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
-			tc.check(t, roundtripped)
+			tc.check(t, oa)
 		})
 	}
 }
@@ -426,12 +413,12 @@ func TestBuildOutput_PTRStandalone(t *testing.T) {
 	if ptr == nil {
 		t.Fatal("no PTR record in output")
 	}
-	d := ptr.Data.(map[string]interface{})
-	if d["target"] != "host.example.com." {
-		t.Errorf("PTR target = %v, want host.example.com.", d["target"])
+	d := ptr.Data.(PTRData)
+	if d.Target != "host.example.com." {
+		t.Errorf("PTR target = %v, want host.example.com.", d.Target)
 	}
-	if d["ip"] != "1.2.3.4" {
-		t.Errorf("PTR ip = %v, want 1.2.3.4 (from Answer.Hostname)", d["ip"])
+	if d.IP != "1.2.3.4" {
+		t.Errorf("PTR ip = %v, want 1.2.3.4 (from Answer.Hostname)", d.IP)
 	}
 }
 
@@ -651,8 +638,8 @@ func TestBuildOutput_CNAMEChainCaptured(t *testing.T) {
 	if cname.Rdata != "example.com." {
 		t.Errorf("CNAME rdata = %q, want example.com.", cname.Rdata)
 	}
-	if d := cname.Data.(map[string]interface{}); d["target"] != "example.com." {
-		t.Errorf("CNAME data.target = %v, want example.com.", d["target"])
+	if d := cname.Data.(CNAMEData); d.Target != "example.com." {
+		t.Errorf("CNAME data.target = %v, want example.com.", d.Target)
 	}
 	if a == nil {
 		t.Fatal("no resolved A record in output")
