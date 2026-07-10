@@ -1,3 +1,24 @@
+dany (1.7.0) unstable; urgency=medium
+
+  * Library ergonomics: NewResolvers is now variadic, so a round-robin
+    resolver set can be built in a single call — NewResolvers(ip1, ip2, ...)
+    or NewResolvers(slice...) — instead of seeding with one IP and
+    Append()ing the rest. The single-IP form is unchanged. It now panics if
+    called with no IPs, since an empty set has no resolver for Next() to
+    return.
+
+  * New NewResolversFromStrings([]string) (*Resolvers, error) helper: parses
+    and validates a list of IP-address strings, returning an error on the
+    first unparseable entry rather than the silent nil that net.ParseIP
+    yields. LoadResolvers now reuses it, removing a duplicated parse loop; a
+    latent unclosed-file-handle leak in LoadResolvers is fixed at the same
+    time.
+
+  * Docs: the README now documents the dnx CLI and using dany as a library,
+    and the stale default-types list is corrected to include HTTPS.
+
+ -- Gavin Carr <gavin@openfusion.net>  Fri, 10 Jul 2026 11:48:03 +0800
+
 dany (1.6.0) unstable; urgency=medium
 
   * HTTPS/SVCB record support (RFC 9460): dany now queries the modern
