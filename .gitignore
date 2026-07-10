@@ -2,6 +2,9 @@
 .nfs*
 *~
 
+/.claude/settings.local.json
+/.env.*local
+/.envrc.local
 /DevNotes
 /TODO
 /bin/*
