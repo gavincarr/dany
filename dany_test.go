@@ -227,6 +227,60 @@ func TestRunQuery_Basic(t *testing.T) {
 	}
 }
 
+// TestRunQuery_ResolversOnly pins the README library example: a caller sets
+// Query.Resolvers (not Query.Server) and calls RunQuery. The library must
+// bridge Resolvers -> dialed server itself, so this must return answers, not
+// a "missing address" dial error.
+func TestRunQuery_ResolversOnly(t *testing.T) {
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+
+	host, port, err := net.SplitHostPort(srv.Addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q): %v", srv.Addr, err)
+	}
+	// Point the resolver bridge at testdns's random port for the test.
+	restore := dnsPort
+	dnsPort = port
+	defer func() { dnsPort = restore }()
+
+	q := &Query{
+		Hostname:  "example.com",
+		Types:     []string{"A"},
+		Resolvers: NewResolvers(net.ParseIP(host)),
+		// Server deliberately left empty.
+	}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	if got := Render(answers, false); got != "A\t\t1.2.3.4\n" {
+		t.Errorf("got %q, want A record", got)
+	}
+}
+
+// TestRunQuery_ServerWinsOverResolvers documents precedence: an explicit
+// Server is dialed even when Resolvers is also set (the CLIs rely on this,
+// picking the resolver themselves and setting Server per hostname).
+func TestRunQuery_ServerWinsOverResolvers(t *testing.T) {
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+
+	q := &Query{
+		Hostname:  "example.com",
+		Types:     []string{"A"},
+		Server:    srv.Addr,
+		Resolvers: NewResolvers(net.ParseIP("203.0.113.1")), // bogus; must be ignored
+	}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	if got := Render(answers, false); got != "A\t\t1.2.3.4\n" {
+		t.Errorf("got %q, want A record from Server", got)
+	}
+}
+
 func TestRunQuery_NXDomain(t *testing.T) {
 	srv := testdns.New(t)
 	// Don't register anything → every query returns NXDOMAIN
@@ -487,6 +541,28 @@ func TestRunNXQuery_NX(t *testing.T) {
 	q := &Query{Hostname: "totally-missing.example.com", Server: srv.Addr}
 	if n := RunNXQuery(q); n != 0 {
 		t.Errorf("RunNXQuery on unregistered name = %d, want 0", n)
+	}
+}
+
+// TestRunNXQuery_ResolversOnly is the RunNXQuery counterpart to
+// TestRunQuery_ResolversOnly: setting Resolvers (not Server) must dial the
+// bridged resolver, not the empty string.
+func TestRunNXQuery_ResolversOnly(t *testing.T) {
+	srv := testdns.New(t)
+	host, port, err := net.SplitHostPort(srv.Addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q): %v", srv.Addr, err)
+	}
+	restore := dnsPort
+	dnsPort = port
+	defer func() { dnsPort = restore }()
+
+	q := &Query{
+		Hostname:  "totally-missing.example.com",
+		Resolvers: NewResolvers(net.ParseIP(host)),
+	}
+	if n := RunNXQuery(q); n != 0 {
+		t.Errorf("RunNXQuery (resolvers-only) on unregistered name = %d, want 0", n)
 	}
 }
 

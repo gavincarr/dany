@@ -147,6 +147,28 @@ type Query struct {
 	Tag      bool
 }
 
+// dnsPort is the port appended to resolver IPs when a Query supplies
+// Resolvers but no explicit Server. Declared as a var (not const) so
+// in-process tests can point the resolver bridge at testdns's random port.
+var dnsPort = "53"
+
+// resolveServer returns the host:port dany should dial for q. An explicit
+// q.Server always wins — the CLIs pick a resolver themselves and set Server
+// per hostname. Otherwise, when Resolvers are supplied, one is chosen
+// round-robin via Next() and the DNS port is appended, so library callers
+// can set Resolvers alone (as the README example documents) without also
+// computing Server. Returns "" when neither is set, which surfaces as a
+// per-type dial error rather than a panic.
+func resolveServer(q *Query) string {
+	if q.Server != "" {
+		return q.Server
+	}
+	if q.Resolvers != nil && q.Resolvers.Length > 0 {
+		return net.JoinHostPort(q.Resolvers.Next().String(), dnsPort)
+	}
+	return ""
+}
+
 // Answer is a single DNS resource record returned from a typed query.
 // Type is the queried RR type, uppercase ("A", "MX", "TXT", ...) — plus
 // "PTR" for reverse-lookups synthesised when q.Ptr is set.
@@ -286,7 +308,7 @@ func nxlookup(errorStream chan<- error, client *dns.Client, server, rrtype, host
 // carrying the answer records as []Answer. For A/AAAA queries with q.Ptr
 // set, it also fans out PTR lookups in parallel and appends PTR-typed
 // Answers (Hostname=IP, RR=*dns.PTR) to the same slice.
-func lookup(stream chan<- result, client *dns.Client, rrtype, hostname string, q *Query, usd bool) {
+func lookup(stream chan<- result, client *dns.Client, server, rrtype, hostname string, q *Query, usd bool) {
 	qtype, ok := dns.StringToType[rrtype]
 	if !ok {
 		stream <- result{Error: &QueryError{
@@ -302,7 +324,7 @@ func lookup(stream chan<- result, client *dns.Client, rrtype, hostname string, q
 	msg.RecursionDesired = true
 	msg.SetQuestion(dns.Fqdn(hostname), qtype)
 
-	resp, err := dnsLookup(client, q.Server, msg, rrtype, hostname, q.IgnoreErrors)
+	resp, err := dnsLookup(client, server, msg, rrtype, hostname, q.IgnoreErrors)
 	if err != nil || resp == nil {
 		stream <- result{Error: err}
 		return
@@ -314,7 +336,7 @@ func lookup(stream chan<- result, client *dns.Client, rrtype, hostname string, q
 	}
 
 	if q.Ptr && (rrtype == "A" || rrtype == "AAAA") {
-		answers = append(answers, ptrLookupAll(client, q.Server, resp.Answer)...)
+		answers = append(answers, ptrLookupAll(client, server, resp.Answer)...)
 	}
 
 	// USD probes: a name that exists but returns no records (NODATA / empty
@@ -705,13 +727,17 @@ func RunQuery(q *Query) ([]Answer, []error) {
 	}
 	client.Timeout = timeoutSeconds / 2 * time.Second
 
+	// One resolver per RunQuery call: pick it once so every type for this
+	// hostname hits the same server (matching the CLI's per-hostname choice).
+	server := resolveServer(q)
+
 	for _, t := range q.Types {
-		go lookup(stream, client, strings.ToUpper(t), q.Hostname, q, false)
+		go lookup(stream, client, server, strings.ToUpper(t), q.Hostname, q, false)
 	}
 	if q.Usd {
 		q.IgnoreErrors = true
 		for _, usd := range SupportedUSDs {
-			go lookup(stream, client, "TXT", usd+"."+q.Hostname, q, true)
+			go lookup(stream, client, server, "TXT", usd+"."+q.Hostname, q, true)
 		}
 	}
 	if q.Www {
@@ -719,7 +745,7 @@ func RunQuery(q *Query) ([]Answer, []error) {
 		// surface as an error alongside successful apex answers.
 		q.IgnoreErrors = true
 		for _, t := range wwwTypes(q) {
-			go lookup(stream, client, strings.ToUpper(t), "www."+q.Hostname, q, false)
+			go lookup(stream, client, server, strings.ToUpper(t), "www."+q.Hostname, q, false)
 		}
 	}
 
@@ -772,10 +798,12 @@ func RunNXQuery(q *Query) int {
 	client := new(dns.Client)
 	// Set client timeouts (dial/read/write) to timeoutSeconds / 2
 	client.Timeout = timeoutSeconds / 2 * time.Second
+	// One resolver per call, same as RunQuery (see resolveServer).
+	server := resolveServer(q)
 	// Run standard lookups
 	count := 0
 	for _, t := range types {
-		go nxlookup(errorStream, client, q.Server, t, q.Hostname)
+		go nxlookup(errorStream, client, server, t, q.Hostname)
 		count++
 	}
 
