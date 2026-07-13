@@ -1,3 +1,23 @@
+dany (1.9.0) unstable; urgency=medium
+
+  * Internationalized domain name (IDN) support: hostnames are now normalized
+    to their IDNA A-label (punycode) form at query intake, so a UTF-8 name
+    (dany münchen.de) resolves identically to its already-encoded equivalent
+    (dany xn--mnchen-3ya.de). Names are case-folded and NFC-normalized in the
+    process; underscore labels (_dmarc.<domain>, --usd probes) are preserved.
+    This applies to both dany and dnx, and to the library — RunQuery and
+    RunNXQuery normalize Query.Hostname before dialing, leaving the caller's
+    *Query unmutated and emitting Answers tagged with the A-label form.
+
+  * A hostname that IDNA rejects is now surfaced as a *QueryError carrying the
+    new stable Code "INVALID_NAME"; RunQuery fires no lookups for it. RunNXQuery
+    has no error channel, so it falls back to a best-effort lookup of the
+    original name (which reads as not-NX, matching the existing bias).
+
+  * golang.org/x/net is now a direct dependency (for golang.org/x/net/idna).
+
+ -- Gavin Carr <gavin@openfusion.net>  Mon, 13 Jul 2026 15:50:00 +0800
+
 dany (1.8.0) unstable; urgency=medium
 
   * Library fix: RunQuery/RunNXQuery now honour Query.Resolvers. Previously
