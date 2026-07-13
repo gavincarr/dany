@@ -887,3 +887,114 @@ func TestRunQuery_USDEmpty_RenderGolden(t *testing.T) {
 		t.Errorf("tagged Render = %q, want it to contain %q", tagged, wantTagged)
 	}
 }
+
+// TestNormalizeHost pins the IDNA canonicalization contract: UTF-8 U-labels
+// become A-labels (punycode), names are case-folded, and the labels dany
+// relies on — underscore-prefixed names, already-punycode names, plain ASCII —
+// pass through unchanged. Malformed names return the original string + an error
+// so best-effort callers (RunNXQuery) can still try.
+func TestNormalizeHost(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"utf8 u-label", "café.example.com", "xn--caf-dma.example.com", false},
+		{"case folded", "CAFÉ.EXAMPLE.COM", "xn--caf-dma.example.com", false},
+		{"idempotent a-label", "xn--caf-dma.example.com", "xn--caf-dma.example.com", false},
+		{"multi-byte", "münchen.de", "xn--mnchen-3ya.de", false},
+		{"plain ascii", "example.com", "example.com", false},
+		{"underscore usd label", "_dmarc.example.com", "_dmarc.example.com", false},
+		{"multi-level underscore", "_smtp._tls.example.com", "_smtp._tls.example.com", false},
+		{"trailing dot preserved", "example.com.", "example.com.", false},
+		{"empty", "", "", false},
+		// Malformed A-label: ToASCII rejects it; we return the input verbatim.
+		{"invalid punycode", "xn--a.example.com", "xn--a.example.com", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeHost(tc.in)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("normalizeHost(%q) err = %v, wantErr = %v", tc.in, err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Errorf("normalizeHost(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRunQuery_IDNA proves the library normalizes a UTF-8 hostname to its
+// A-label before dialing: the zone only has the punycode name, so a match
+// requires the conversion. It also pins that the emitted Answer carries the
+// A-label form and that the caller's *Query is left unmutated.
+func TestRunQuery_IDNA(t *testing.T) {
+	srv := testdns.New(t)
+	srv.Add(testdns.MustRR("xn--caf-dma.example.com. 300 IN A 1.2.3.4"))
+
+	q := &Query{
+		Hostname: "café.example.com",
+		Types:    []string{"A"},
+		Server:   srv.Addr,
+	}
+	answers, errs := RunQuery(q)
+	if len(errs) > 0 {
+		t.Fatalf("RunQuery errors: %v", errs)
+	}
+	if got := Render(answers, false); got != "A\t\t1.2.3.4\n" {
+		t.Errorf("Render = %q, want A record", got)
+	}
+	if len(answers) != 1 || answers[0].Hostname != "xn--caf-dma.example.com" {
+		t.Errorf("Answer.Hostname = %q, want the A-label form", answers[0].Hostname)
+	}
+	if q.Hostname != "café.example.com" {
+		t.Errorf("RunQuery mutated q.Hostname to %q; want it left as the caller set it", q.Hostname)
+	}
+}
+
+// TestRunQuery_InvalidNameError pins that an IDNA-invalid hostname is a single
+// structured INVALID_NAME error and fires no lookups (no partial answers).
+func TestRunQuery_InvalidNameError(t *testing.T) {
+	srv := testdns.New(t)
+
+	q := &Query{
+		Hostname: "xn--a.example.com",
+		Types:    []string{"A", "MX"},
+		Server:   srv.Addr,
+	}
+	answers, errs := RunQuery(q)
+	if len(answers) != 0 {
+		t.Errorf("got %d answers, want 0 for an invalid name", len(answers))
+	}
+	if len(errs) != 1 {
+		t.Fatalf("got %d errors, want exactly 1; errs = %v", len(errs), errs)
+	}
+	var qe *QueryError
+	if !errors.As(errs[0], &qe) {
+		t.Fatalf("error is not a *QueryError: %v", errs[0])
+	}
+	if qe.Code != "INVALID_NAME" {
+		t.Errorf("QueryError.Code = %q, want INVALID_NAME", qe.Code)
+	}
+	if qe.Hostname != "xn--a.example.com" {
+		t.Errorf("QueryError.Hostname = %q, want the original name", qe.Hostname)
+	}
+}
+
+// TestRunNXQuery_IDNA proves RunNXQuery probes the A-label form: the zone has
+// the punycode name existing (NoData for every NXType, so no probe returns
+// NXDOMAIN), so a UTF-8 query resolves to "not NX". Without normalization the
+// raw-UTF-8 name wouldn't exist and every probe would NXDOMAIN → fully NX.
+func TestRunNXQuery_IDNA(t *testing.T) {
+	srv := testdns.New(t)
+	srv.AddEmpty("xn--caf-dma.example.com")
+
+	q := &Query{
+		Hostname: "café.example.com",
+		Server:   srv.Addr,
+	}
+	if got := RunNXQuery(q); got != len(NXTypes) {
+		t.Errorf("RunNXQuery = %d, want %d (not-NX: the A-label exists)", got, len(NXTypes))
+	}
+}

@@ -76,6 +76,13 @@ www.google.com          A               142.251.150.119
 www.google.com          AAAA            2404:6800:4006:80d::2004
 ```
 
+Internationalized domain names are supported: hostnames are normalized to their
+IDNA A-label (punycode) form before querying, so you can pass a UTF-8 name
+directly (`dany münchen.de`) or its already-encoded equivalent
+(`dany xn--mnchen-3ya.de`) — both resolve identically. Names are case-folded and
+Unicode-normalized (NFC) in the process; underscore labels (`_dmarc.<domain>`,
+`--usd` probes) are preserved. This applies to both `dany` and `dnx`.
+
 The `-f/--fmt` flag selects the output format: `text` (default, the
 tab-separated form shown above), `json`, or `yaml` (`yml` as a convenience
 alias). In `json` and `yaml` modes:
@@ -217,7 +224,10 @@ Key API surface:
 - **Query functions.** `RunQuery(q *Query) ([]Answer, []error)` does the
   typed-ANY aggregation; `RunNXQuery(q *Query) int` powers `dnx` (returns the
   number of non-NXDOMAIN responses, so `0` means every probe type was
-  NXDOMAIN).
+  NXDOMAIN). Both normalize `q.Hostname` to its IDNA A-label (punycode) form
+  first, so you can set a UTF-8 `Hostname` (`"münchen.de"`) directly; the
+  caller's `*Query` is left unmutated. `RunQuery` reports a name IDNA rejects
+  as a single `*QueryError` with `Code` `"INVALID_NAME"` and fires no lookups.
 - **Renderers.** `Render(answers, tagHostname)` produces the tab-separated
   text; `RenderJSON` / `RenderYAML` produce the structured formats. All three
   consume the same `[]Answer` — the query path does no formatting and the
@@ -228,8 +238,8 @@ Key API surface:
   parses and validates IP strings, returning an error instead; `LoadResolvers(file)`
   reads them from a file. Append more with `(*Resolvers).Append`.
 - **Errors are structured.** Each is a `*QueryError` carrying a stable `Code`
-  (`NXDOMAIN`, `SERVFAIL`, `EXCHANGE_ERROR`, `UNSUPPORTED_TYPE`, …) and
-  supports `errors.Is` against `ErrNXDomain` / `ErrServFail`.
+  (`NXDOMAIN`, `SERVFAIL`, `EXCHANGE_ERROR`, `UNSUPPORTED_TYPE`, `INVALID_NAME`,
+  …) and supports `errors.Is` against `ErrNXDomain` / `ErrServFail`.
 - **Type constants.** `DefaultRRTypes`, `SupportedRRTypes`, `DNSSECRRTypes`,
   `DNSSECBundle`, `NXTypes`, and `SupportedUSDs` expose the same type sets the
   CLIs use.

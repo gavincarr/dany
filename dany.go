@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"golang.org/x/net/idna"
 )
 
 const timeoutSeconds = 10
@@ -205,8 +206,9 @@ var ErrServFail = errors.New("SERVFAIL")
 // QueryError is the structured error type emitted by RunQuery / RunNXQuery
 // goroutines. It carries the RR type and hostname that were being queried
 // plus a stable string Code (DNS rcode names like "NXDOMAIN"/"SERVFAIL",
-// plus "EXCHANGE_ERROR" for transport-level failures and "UNSUPPORTED_TYPE"
-// for unknown RR types) so structured consumers — notably the JSON renderer
+// plus "EXCHANGE_ERROR" for transport-level failures, "UNSUPPORTED_TYPE"
+// for unknown RR types, and "INVALID_NAME" for a hostname IDNA rejects) so
+// structured consumers — notably the JSON renderer
 // — can act on errors without parsing the message.
 //
 // Error() preserves the historical `Error on <type> lookup for "<host>": <…>`
@@ -238,6 +240,35 @@ func rcodeCode(rcode int) string {
 		return s
 	}
 	return fmt.Sprintf("RCODE_%d", rcode)
+}
+
+// idnaProfile canonicalizes hostnames for DNS lookups. MapForLookup applies
+// IDNA2008 mapping (case-folding, NFC normalization, U-label -> A-label /
+// punycode). StrictDomainName(false) disables the STD3 LDH rule so underscore
+// labels survive — dany queries underscore names directly (e.g.
+// _dmarc.<domain>) and builds the --usd probe labels from the same host, and
+// '_' is disallowed-STD3-valid, so it round-trips once STD3 is off.
+// Transitional(false) selects the non-transitional IDNA2008 mapping (e.g. ß is
+// preserved rather than expanded to ss).
+var idnaProfile = idna.New(
+	idna.MapForLookup(),
+	idna.StrictDomainName(false),
+	idna.Transitional(false),
+)
+
+// normalizeHost converts an internationalized (UTF-8 U-label) hostname to its
+// IDNA A-label (punycode) form so it matches what is registered in the zone —
+// miekg/dns is 8-bit-clean and would otherwise ship the raw UTF-8 bytes, which
+// resolve to NXDOMAIN. ASCII hostnames (including underscore-prefixed names and
+// already-punycode labels) pass through unchanged and idempotently. On a name
+// IDNA rejects as invalid, the original string is returned alongside the error
+// so best-effort callers can still attempt the lookup.
+func normalizeHost(host string) (string, error) {
+	ascii, err := idnaProfile.ToASCII(host)
+	if err != nil {
+		return host, err
+	}
+	return ascii, nil
 }
 
 /*
@@ -719,6 +750,16 @@ func wwwTypes(q *Query) []string {
 // On wall-clock timeout (timeoutSeconds), in-flight goroutines' results
 // are silently dropped — they appear as neither Answers nor errors.
 func RunQuery(q *Query) ([]Answer, []error) {
+	// Canonicalize the queried name to its IDNA A-label form up front so a
+	// UTF-8 hostname resolves against what's actually in the zone. An invalid
+	// name is fatal for the whole query — surface it as a structured error
+	// rather than firing guaranteed-to-fail lookups. www/USD probe names are
+	// built from this already-ASCII host below.
+	host, err := normalizeHost(q.Hostname)
+	if err != nil {
+		return nil, []error{&QueryError{Hostname: q.Hostname, Code: "INVALID_NAME", Err: err}}
+	}
+
 	count := len(q.Types)
 	if q.Usd {
 		count += len(SupportedUSDs)
@@ -748,14 +789,14 @@ func RunQuery(q *Query) ([]Answer, []error) {
 	ignoreErrors := q.IgnoreErrors
 
 	for _, t := range q.Types {
-		go lookup(stream, client, server, strings.ToUpper(t), q.Hostname, q, false, ignoreErrors)
+		go lookup(stream, client, server, strings.ToUpper(t), host, q, false, ignoreErrors)
 	}
 	if q.Usd {
 		// USD probes are existence checks: a probe that errors shouldn't fail
 		// the whole query, so suppress their errors regardless of the caller's
 		// setting.
 		for _, usd := range SupportedUSDs {
-			go lookup(stream, client, server, "TXT", usd+"."+q.Hostname, q, true, true)
+			go lookup(stream, client, server, "TXT", usd+"."+host, q, true, true)
 		}
 	}
 	if q.Www {
@@ -763,7 +804,7 @@ func RunQuery(q *Query) ([]Answer, []error) {
 		// as an error alongside successful apex answers (usd=false here, so
 		// suppression is a distinct argument from the empty-record signal).
 		for _, t := range wwwTypes(q) {
-			go lookup(stream, client, server, strings.ToUpper(t), "www."+q.Hostname, q, false, true)
+			go lookup(stream, client, server, strings.ToUpper(t), "www."+host, q, false, true)
 		}
 	}
 
@@ -803,6 +844,13 @@ loop:
 // NX probes intentionally stay on UDP regardless of q.Udp — responses are
 // tiny and there is no benefit to TCP for this codepath.
 func RunNXQuery(q *Query) int {
+	// Canonicalize to the IDNA A-label form so a UTF-8 hostname is probed as
+	// what's in the zone. RunNXQuery has no error channel, so on an invalid
+	// name fall through with the original string (normalizeHost returns it):
+	// the probes then fail as non-NX, matching the documented "bias toward
+	// not-NX" for anything we can't cleanly resolve.
+	host, _ := normalizeHost(q.Hostname)
+
 	types := NXTypes
 	if len(q.Types) > 0 {
 		types = make([]string, len(q.Types))
@@ -821,7 +869,7 @@ func RunNXQuery(q *Query) int {
 	// Run standard lookups
 	count := 0
 	for _, t := range types {
-		go nxlookup(errorStream, client, server, t, q.Hostname)
+		go nxlookup(errorStream, client, server, t, host)
 		count++
 	}
 
