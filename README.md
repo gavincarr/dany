@@ -85,7 +85,9 @@ Unicode-normalized (NFC) in the process; underscore labels (`_dmarc.<domain>`,
 
 The `-f/--fmt` flag selects the output format: `text` (default, the
 tab-separated form shown above), `json`, or `yaml` (`yml` as a convenience
-alias). In `json` and `yaml` modes:
+alias). `-j/--json` is a shorthand for `--fmt json`; combining it with a
+different `--fmt` is an error rather than a silent override. In `json` and
+`yaml` modes:
 
 - Each record carries both `rdata` (the canonical DNS presentation form,
   always a string) and `data` (a typed per-RR-type payload — `address`

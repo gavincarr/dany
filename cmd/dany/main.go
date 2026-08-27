@@ -42,6 +42,7 @@ type Options struct {
 	Www       bool   `short:"w" help:"also lookup A/AAAA records for www.<hostname>"`
 	Tag       bool   `short:"T" help:"tag output lines with hostname (text format only; default to true if multiple hostnames)"`
 	Fmt       string `short:"f" enum:"text,json,yaml,yml" default:"text" help:"output format (one of: ${enum})"`
+	Json      bool   `short:"j" name:"json" help:"shorthand for --fmt json"`
 	Output    string `short:"o" help:"write output to <path> instead of stdout (truncates; appends across multiple hostnames within one invocation)"`
 	Version   bool   `help:"print version and exit"`
 	Resolvers string `short:"r" name:"resolv" help:"text file of ip addresses to use as resolvers"`
@@ -336,11 +337,31 @@ func openOutput(path string, defaultOut io.Writer) (io.Writer, io.Closer, error)
 	return f, f, nil
 }
 
+// resolveFmt collapses -j/--json onto -f/--fmt, returning the effective
+// output format. -j is exactly equivalent to `--fmt json`; combining it with
+// a different explicit --fmt is a contradiction, so it errors rather than
+// silently picking a winner. (--fmt's "text" default is indistinguishable
+// from an explicit `--fmt text`, so that pairing is accepted as a no-op.)
+func resolveFmt(opts Options) (string, error) {
+	if !opts.Json {
+		return opts.Fmt, nil
+	}
+	if opts.Fmt != "" && opts.Fmt != "text" && opts.Fmt != "json" {
+		return "", fmt.Errorf("Error: -j/--json conflicts with --fmt %s", opts.Fmt)
+	}
+	return "json", nil
+}
+
 // runCLI is the testable entry point: turns Options into a dany.Query, runs
 // the lookups, and writes rendered output to out. -o/--output overrides
 // out; per-error stderr writes (text mode) still go to os.Stderr.
 func runCLI(opts Options, out io.Writer) error {
 	setupLogger(opts.Verbose)
+
+	outFmt, err := resolveFmt(opts)
+	if err != nil {
+		return err
+	}
 
 	args := []string{opts.Args.Hostname}
 	if len(opts.Args.Hostname2) > 0 {
@@ -373,7 +394,7 @@ func runCLI(opts Options, out io.Writer) error {
 		}
 
 		answers, errs := dany.RunQuery(q)
-		switch opts.Fmt {
+		switch outFmt {
 		case "json":
 			// Errors fold into the JSON envelope; nothing goes to stderr.
 			fmt.Fprint(out, dany.RenderJSON(answers, q, errs))

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -445,4 +446,76 @@ func equalStringSlices(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestResolveFmt(t *testing.T) {
+	tests := []struct {
+		name    string
+		json    bool
+		fmtOpt  string
+		want    string
+		wantErr bool
+	}{
+		{name: "no -j passes fmt through", fmtOpt: "yaml", want: "yaml"},
+		{name: "no -j, no fmt", fmtOpt: "", want: ""},
+		{name: "-j alone", json: true, want: "json"},
+		{name: "-j with default text", json: true, fmtOpt: "text", want: "json"},
+		{name: "-j with explicit json", json: true, fmtOpt: "json", want: "json"},
+		{name: "-j conflicts with yaml", json: true, fmtOpt: "yaml", wantErr: true},
+		{name: "-j conflicts with yml", json: true, fmtOpt: "yml", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveFmt(Options{Json: tc.json, Fmt: tc.fmtOpt})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("resolveFmt() = %q, want error", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveFmt: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("resolveFmt() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// -j must produce byte-identical output to --fmt json.
+func TestRunCLI_JSONShorthand(t *testing.T) {
+	srv := withTestDNS(t)
+	srv.Add(testdns.MustRR("example.com. 300 IN A 1.2.3.4"))
+
+	run := func(opts Options) string {
+		opts.Server = "127.0.0.1"
+		opts.Types = "A"
+		opts.Args.Hostname = "example.com"
+		var buf bytes.Buffer
+		if err := runCLI(opts, &buf); err != nil {
+			t.Fatalf("runCLI: %v", err)
+		}
+		return buf.String()
+	}
+
+	shorthand := run(Options{Json: true})
+	long := run(Options{Fmt: "json"})
+
+	if shorthand != long {
+		t.Errorf("-j output = %q, want it to match --fmt json output %q", shorthand, long)
+	}
+	if !json.Valid([]byte(shorthand)) {
+		t.Errorf("-j output is not valid JSON: %s", shorthand)
+	}
+}
+
+func TestRunCLI_JSONShorthandConflict(t *testing.T) {
+	opts := Options{Server: "127.0.0.1", Types: "A", Json: true, Fmt: "yaml"}
+	opts.Args.Hostname = "example.com"
+
+	if err := runCLI(opts, io.Discard); err == nil {
+		t.Fatal("runCLI(-j --fmt yaml) = nil, want conflict error")
+	}
 }
