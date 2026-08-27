@@ -1,3 +1,29 @@
+dany (1.10.0) unstable; urgency=medium
+
+  * New -j/--json shorthand for --fmt json in dany. JSON is the common case
+    for scripted use, and -f json was a two-token detour for it. The flag
+    collapses onto Fmt before rendering, so there is still a single source of
+    truth for the output format. Combining -j with a contradictory explicit
+    --fmt (e.g. -j --fmt yaml) is an error rather than a silently-picked
+    winner; --fmt text is exempt, since kong's default is indistinguishable
+    from an explicit choice.
+
+  * New Issues.md recording long-lived issues and deferred design decisions.
+    The first entry is the resolver blind-spot problem: some recursive
+    resolvers systematically refuse particular RR types regardless of the
+    domain queried (systemd-resolved's stub SERVFAILs every DNSKEY lookup,
+    signed zone or not). dany reports the rcode faithfully, but a
+    resolver-limitation SERVFAIL is indistinguishable from a zone-side one,
+    and the NODATA variant produces no output at all. Round-robin resolver
+    pools make it worse — one blind resolver degrades ~1/N of queries,
+    scattered, looking like transient noise. The entry records the current
+    rcode-handling taxonomy and the shape a pre-flight resolver check would
+    take, along with why it isn't implemented: a pre-flight adds a full extra
+    multi-type round trip to every invocation, a poor trade for the one-off
+    interactive queries dany is mostly used for.
+
+ -- Gavin Carr <gavin@openfusion.net>  Thu, 27 Aug 2026 13:18:53 +0800
+
 dany (1.9.0) unstable; urgency=medium
 
   * Internationalized domain name (IDN) support: hostnames are now normalized
