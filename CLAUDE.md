@@ -13,6 +13,8 @@ Two CLI binaries share one library:
 - `cmd/dany/main.go` — the `dany` CLI: simulates DNS `ANY` queries by firing the configured RR types (default `A,AAAA,HTTPS,MX,NS,SOA,TXT`) concurrently and aggregating results. `-f/--fmt {text,json,yaml,yml}` selects the renderer; structured modes (`json` / `yaml` / `yml`) fold errors into the envelope instead of going to stderr.
 - `cmd/dnx/main.go` — the `dnx` CLI: takes hostnames (args or stdin) and reports those that return NXDOMAIN. For safety it runs all `NXTypes` (`MX,NS,SOA`) concurrently per hostname and only reports a host as NX if *every* type returns NXDOMAIN (`RunNXQuery` returns `len(NXTypes) - nxcount`).
 
+`Issues.md` (repo root) records long-lived issues and deferred design decisions — currently the resolver-blind-spot problem (some resolvers SERVFAIL or NODATA on particular RR types regardless of domain, indistinguishable from a zone-side failure) and the pre-flight check that would address it. Add an entry there rather than burying a known-limitation note in a code comment.
+
 Module path: `github.com/gavincarr/dany` (Go 1.25, deps: `miekg/dns`, `jessevdk/go-flags`, `gopkg.in/yaml.v3`).
 
 Versioning: `internal/version/VERSION` is the single source of truth — a `//go:embed`'d plain-semver string read into both CLIs (`dany --version` / `dnx --version`). `scripts/release.sh <version>` syncs it with `debian/changelog`, commits, and tags. The changelog is the *structural* gate: the release script refuses to tag unless the head stanza version matches the requested arg, so there is no path to releasing a version that hasn't been written about.
